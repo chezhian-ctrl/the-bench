@@ -43,7 +43,11 @@
   }
   .frame{
     position:relative;
-    width:100%; max-width:520px;
+    /* fixed design box (ratio 240:176); JS scales it to fill the viewport */
+    width:480px; height:352px;
+    flex:none;
+    transform: scale(var(--fit, 1));
+    transform-origin:center center;
   }
 
   /* ---- the game viewport ---- */
@@ -574,12 +578,23 @@ function drawDeco(d,sx,sy){
       px(sx+1,sy+4,3,10,COL.glassLite); px(sx+TILE-4,sy+4,3,10,COL.glassLite);
       px(sx+4,sy+8,TILE-8,4,'rgba(0,0,0,.1)');
       break;
-    case 'window':
-      px(sx+2,sy+3,TILE-4,10,COL.glass);
-      px(sx+2,sy+3,TILE-4,2,COL.glassLite);
-      px(sx+TILE/2-1,sy+3,2,10,COL.wall);
-      px(sx+3,sy+4,3,3,COL.glassLite);
+    case 'window': {
+      // 11pm night view: dark sky, a couple of stars, a distant lit skyline
+      px(sx+1,sy+2,TILE-2,12,COL.woodDark);            // frame
+      px(sx+2,sy+3,TILE-4,10,'#161d30');               // night sky
+      px(sx+2,sy+3,TILE-4,3,'#26314a');                // faint horizon glow up top
+      const b = (d.tx*7 + d.ty*3);
+      px(sx+3+(b%8), sy+4+((b>>1)%3), 1,1,'rgba(241,233,216,.85)');   // star
+      px(sx+4+((b*3)%7), sy+5+((b>>2)%3), 1,1,'rgba(241,233,216,.55)'); // star
+      px(sx+2,sy+9,TILE-4,4,'#0e1422');                // distant skyline band
+      for(let i=0;i<5;i++){                            // warm windows in the skyline
+        if(((b+i*5)%3)!==0) px(sx+3+i*2, sy+10+((b+i)%2), 1,1, i%2?'#F2C14E':'#EE9B3F');
+      }
+      px(sx+TILE/2-1,sy+3,1,10,COL.woodDark);          // vertical muntin
+      px(sx+2,sy+7,TILE-4,1,COL.woodDark);             // horizontal muntin
+      px(sx+1,sy+2,TILE-2,1,COL.wood);                 // top frame highlight
       break;
+    }
     case 'mat':
       px(sx+2,sy+5,TILE-4,8,COL.rugEdge); px(sx+4,sy+7,TILE-8,4,COL.rug);
       break;
@@ -1438,4 +1453,15 @@ function typeLoop(ts){
   requestAnimationFrame(typeLoop);
 }
 requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; requestAnimationFrame(loop); requestAnimationFrame(typeLoop); });
+
+/* ---- scale the whole game to fill the viewport (keeps 240:176, letterboxes sides) ---- */
+const _frameEl = document.querySelector('.frame');
+function fitFrame(){
+  const s = Math.min(window.innerWidth / 480, window.innerHeight / 352) * 0.98;
+  _frameEl.style.setProperty('--fit', s);
+}
+window.addEventListener('resize', fitFrame);
+window.addEventListener('orientationchange', fitFrame);
+fitFrame();
 </script>
+
