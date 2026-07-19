@@ -726,6 +726,8 @@ function render(){
     const sy = y*TILE - camY;
     for(let i=0;i<cols;i++){ drawFloorTile(i*TILE, sy, (i+y)%2===0); }
   }
+  // ambient life in the open side floor (decorative)
+  drawAmbient();
   // the room map, centered by XOFF
   for(let y=startY; y<endY; y++){
     for(let x=0; x<MAP_W; x++){
@@ -754,8 +756,81 @@ function render(){
 }
 
 /* ============================================================= *
- *  GAME LOOP
+ *  AMBIENT LIFE  — pedestrians strolling the open side floor.
+ *  Purely decorative. Some stare at phones and walk into each other.
  * ============================================================= */
+const AMB_PAL = [
+  {skin:'#caa06e', top:'#6ED190', leg:'#37471F', hair:'#241c14'},
+  {skin:'#e8b98a', top:'#D9E38A', leg:'#3E4A22', hair:'#4a3b2a'},
+  {skin:'#b07d4e', top:'#7FA592', leg:'#20261A', hair:'#1a1512'},
+  {skin:'#d8a679', top:'#A97C4E', leg:'#37471F', hair:'#3a2e1e'},
+  {skin:'#c99a66', top:'#5FBF86', leg:'#2a3318', hair:'#211a12'},
+  {skin:'#e0b487', top:'#C9D46E', leg:'#333d1c', hair:'#2e2418'},
+];
+let ambient = [];
+function newAmb(side, fresh){
+  const worldH = MAP_H*TILE;
+  const dir = Math.random()<0.5 ? 1 : -1;               // +1 down, -1 up
+  const worldY = fresh ? Math.random()*worldH
+                       : (dir>0 ? camY-24 : camY+VIEW_H+24);
+  return {
+    side, lane:0.18+Math.random()*0.64, worldY,
+    vy: dir*(14+Math.random()*24),                      // px / sec
+    pal: AMB_PAL[(Math.random()*AMB_PAL.length)|0],
+    phone: Math.random()<0.55,                          // over half are on their phones
+    frame:0, ft:0, bump:0
+  };
+}
+function initAmbient(){ ambient=[]; for(let i=0;i<9;i++) ambient.push(newAmb(i%2?'R':'L', true)); }
+function updateAmbient(dt){
+  for(const a of ambient){
+    if(a.bump>0){ a.bump-=dt; }
+    else{
+      a.worldY += a.vy*dt/1000;
+      a.ft+=dt; if(a.ft>170){ a.ft=0; a.frame^=1; }
+    }
+    const sy=a.worldY-camY;
+    if(sy < -48 || sy > VIEW_H+48) Object.assign(a, newAmb(a.side, false));
+  }
+  // head-on collisions: same side, near lane, opposite direction, phone-zombies don't dodge
+  for(let i=0;i<ambient.length;i++) for(let j=i+1;j<ambient.length;j++){
+    const a=ambient[i], b=ambient[j];
+    if(a.side!==b.side || a.bump>0 || b.bump>0) continue;
+    if(Math.abs(a.lane-b.lane)>0.13) continue;
+    if((a.vy>0)===(b.vy>0)) continue;
+    if(Math.abs(a.worldY-b.worldY) < 11){
+      a.bump=b.bump=720;                                // freeze ~0.7s, flash "!"
+      if(a.lane<=b.lane){ a.lane=Math.max(0.06,a.lane-0.13); b.lane=Math.min(0.94,b.lane+0.13); }
+      else { a.lane=Math.min(0.94,a.lane+0.13); b.lane=Math.max(0.06,b.lane-0.13); }
+    }
+  }
+}
+function drawAmbient(){
+  const rightX0 = XOFF + MAP_W*TILE;
+  const leftW = XOFF, rightW = VIEW_W - rightX0;
+  for(const a of ambient){
+    const laneW = a.side==='L' ? leftW : rightW;
+    if(laneW < 20) continue;                            // no room on narrow screens
+    const baseX = a.side==='L' ? 0 : rightX0;
+    const sx = Math.round(baseX + 5 + a.lane*(laneW-14));
+    const sy = Math.round(a.worldY - camY);
+    if(sy<-24 || sy>VIEW_H+8) continue;
+    drawPed(sx, sy, a);
+  }
+}
+function drawPed(sx, sy, a){
+  const p=a.pal, bob=(a.bump>0)?0:(a.frame?1:0);
+  ctx.fillStyle='rgba(0,0,0,0.16)'; ctx.fillRect(sx+1, sy+11, 6, 2);        // shadow
+  ctx.fillStyle=p.leg; ctx.fillRect(sx+1, sy+7+bob, 2, 4); ctx.fillRect(sx+5, sy+7-bob, 2, 4); // legs
+  ctx.fillStyle=p.top; ctx.fillRect(sx+1, sy+3, 6, 5);                      // torso
+  ctx.fillStyle=p.skin; ctx.fillRect(sx+2, sy, 4, 4);                       // head
+  ctx.fillStyle=p.hair; ctx.fillRect(sx+2, sy, 4, 1); ctx.fillRect(sx+2, sy, 1, 3);
+  if(a.phone){ ctx.fillStyle=p.skin; ctx.fillRect(sx, sy+4, 2, 2);          // arm holding phone
+    ctx.fillStyle='#EAF4B0'; ctx.fillRect(sx-1, sy+4, 2, 2); }             // phone glow
+  if(a.bump>0){ ctx.fillStyle='#D98C6A'; ctx.fillRect(sx+3, sy-5, 1, 3); ctx.fillRect(sx+3, sy-1, 1, 1); } // "!"
+}
+
+
 let state = 'title'; // title | playing | dialogue | profile | loading | verdict
 let last = 0;
 function loop(ts){
@@ -766,6 +841,7 @@ function loop(ts){
   const targetCam = clamp(player.py + TILE/2 - VIEW_H/2, 0, MAP_H*TILE - VIEW_H);
   camY += (targetCam - camY) * 0.2;
   if(Math.abs(targetCam-camY)<0.4) camY=targetCam;
+  updateAmbient(dt);
   render();
   requestAnimationFrame(loop);
 }
@@ -821,7 +897,7 @@ let awaitAction = false;
 
 let qStack = [];            // per-room checkpoint stack for "back to previous question"
 let _restoring = false;
-const MAX_FREE_TURNS = 2;   // per ✎ question: up to 2 typed exchanges
+const MAX_FREE_TURNS = 3;   // per ✎ question: up to 3 typed entries (initial + 2 follow-ups)
 const freeState = {};       // transient thread state per question key, reset each room
 
 function speak(lines, speaker, done){
@@ -1492,100 +1568,95 @@ async function renderCard(v){
     (document.fonts?document.fonts.ready:Promise.resolve()),
     new Promise(r=>setTimeout(r,1200))
   ]);
-  const W=1080,H=1400, m=64;
+  const W=1080, m=64;
   const paper='#EEF2DC', ink='#151A0F', lime='#D9E38A', mint='#6ED190', muted='#79855C';
   const LEVELCOL={ go:'#6ED190', conditional:'#D9E38A', not_yet:'#E7B24A', skip:'#D98C6A' };
   const chipCol = LEVELCOL[v.call_level] || lime;
-
-  // frame
-  cctx.fillStyle=ink; cctx.fillRect(0,0,W,H);
-  cctx.fillStyle=paper; cctx.fillRect(m/2, m/2, W-m, H-m);
   const x=m+18, right=W-m-18, w=right-x;
-  let y=m+30;
+
+  const nm=(profile.name||'').trim();
+  const roleCo=[profile.role, profile.company].filter(Boolean).join(', ');
+  const nameLine=(nm + (roleCo? '   ·   '+roleCo : '')).toUpperCase();
+  const badge=(v.archetype||'').toUpperCase();
+  const call=(v.final_call||'').toUpperCase();
 
   const trunc=(s,maxW)=>{ if(cctx.measureText(s).width<=maxW) return s; let t=s;
     while(t.length>1 && cctx.measureText(t+'…').width>maxW) t=t.slice(0,-1); return t+'…'; };
-  const eyebrow=(t)=>{ cctx.fillStyle=muted; cctx.font='700 22px "Space Grotesk",sans-serif'; cctx.fillText(t, x, y); y+=34; };
+  function eyebrow(draw,t,y){ cctx.font='700 21px "Space Grotesk",sans-serif';
+    if(draw){ cctx.fillStyle=muted; cctx.fillText(t,x,y); } return y+21+13; }
+  function block(draw,arr,y,lh,color){ if(draw) cctx.fillStyle=color;
+    for(const ln of arr){ if(draw) cctx.fillText(ln,x,y); y+=lh; } return y; }
 
-  // top label row
-  cctx.textBaseline='alphabetic'; cctx.textAlign='left';
-  cctx.fillStyle=ink; cctx.font='700 26px "Space Grotesk", sans-serif';
-  cctx.fillText('THE GREEN ROOM', x, y+8);
-  cctx.fillStyle=ink; cctx.textAlign='right'; cctx.fillText('MBA VERDICT', right, y+8); cctx.textAlign='left';
-  y+=30; cctx.fillStyle=ink; cctx.fillRect(x,y,w,3); y+=40;
+  // single layout routine used for BOTH the measure pass and the draw pass,
+  // so the auto-fit height always matches what gets drawn (no overlap).
+  function layout(draw){
+    cctx.textBaseline='top'; cctx.textAlign='left';
+    let y=m+34;
 
-  // who (from LinkedIn) — only if present
-  const nm=(profile.name||'').trim();
-  if(nm){
-    const roleCo=[profile.role, profile.company].filter(Boolean).join(', ');
-    const line=(nm + (roleCo? '   ·   '+roleCo : '')).toUpperCase();
-    cctx.fillStyle=ink; cctx.font='700 24px "Space Grotesk",sans-serif';
-    cctx.fillText(trunc(line, w), x, y); y+=40;
-  }
+    cctx.font='700 26px "Space Grotesk",sans-serif';
+    if(draw){ cctx.fillStyle=ink; cctx.fillText('THE GREEN ROOM', x, y);
+      cctx.textAlign='right'; cctx.fillText('MBA VERDICT', right, y); cctx.textAlign='left'; }
+    y+=34;
+    if(draw){ cctx.fillStyle=ink; cctx.fillRect(x,y,w,3); } y+=3+30;
 
-  // archetype
-  eyebrow('YOUR ARCHETYPE');
-  const badge=(v.archetype||'').toUpperCase();
-  cctx.font='900 38px "Archivo Black","Space Grotesk",sans-serif';
-  const bw=cctx.measureText(badge).width;
-  cctx.fillStyle=lime; roundRect(cctx, x, y, Math.min(bw+40, w), 62, 12); cctx.fill();
-  cctx.fillStyle=ink; cctx.fillText(badge, x+20, y+45); y+=62+14;
-  if(v.archetype_line){
-    cctx.fillStyle=ink; cctx.font='500 italic 26px "Space Grotesk",sans-serif';
-    for(const ln of wrap(cctx, v.archetype_line, w)){ cctx.fillText(ln, x, y+22); y+=34; }
-  }
-  y+=30;
+    if(nm){ cctx.font='700 23px "Space Grotesk",sans-serif';
+      if(draw){ cctx.fillStyle=ink; cctx.fillText(trunc(nameLine,w), x, y); } y+=23+22; }
 
-  // headline (hero)
-  cctx.fillStyle=ink; cctx.font='900 56px "Archivo Black","Space Grotesk",sans-serif';
-  for(const ln of wrap(cctx, '“'+(v.headline||'')+'”', w)){ cctx.fillText(ln, x, y+40); y+=64; }
-  y+=18;
+    y=eyebrow(draw,'YOUR ARCHETYPE',y);
+    cctx.font='900 36px "Archivo Black","Space Grotesk",sans-serif';
+    const bw=Math.min(cctx.measureText(badge).width+40, w);
+    if(draw){ cctx.fillStyle=lime; roundRect(cctx,x,y,bw,60,12); cctx.fill();
+      cctx.fillStyle=ink; cctx.textBaseline='middle'; cctx.fillText(badge, x+20, y+31); cctx.textBaseline='top'; }
+    y+=60+16;
+    if(v.archetype_line){ cctx.font='500 italic 25px "Space Grotesk",sans-serif';
+      y=block(draw, wrap(cctx, v.archetype_line, w), y, 34, ink); }
+    y+=28;
 
-  // final-call chip (colored by level)
-  const call=(v.final_call||'').toUpperCase();
-  cctx.font='800 30px "Space Grotesk",sans-serif';
-  const cw=cctx.measureText(call).width;
-  cctx.fillStyle=chipCol; roundRect(cctx, x, y, cw+44, 58, 12); cctx.fill();
-  cctx.fillStyle=ink; cctx.fillText(call, x+22, y+39); y+=58+40;
+    cctx.font='900 52px "Archivo Black","Space Grotesk",sans-serif';
+    y=block(draw, wrap(cctx, '“'+(v.headline||'')+'”', w), y, 60, ink);
+    y+=22;
 
-  // divider
-  cctx.fillStyle=ink; cctx.fillRect(x,y,w,2); y+=40;
+    cctx.font='800 29px "Space Grotesk",sans-serif';
+    const cw=cctx.measureText(call).width;
+    if(draw){ cctx.fillStyle=chipCol; roundRect(cctx,x,y,cw+44,56,12); cctx.fill();
+      cctx.fillStyle=ink; cctx.textBaseline='middle'; cctx.fillText(call, x+22, y+29); cctx.textBaseline='top'; }
+    y+=56+42;
 
-  // the read
-  eyebrow('THE READ');
-  cctx.fillStyle=ink; cctx.font='500 29px "Space Grotesk",sans-serif';
-  for(const ln of wrap(cctx, v.read||'', w)){ cctx.fillText(ln, x, y+22); y+=40; }
-  y+=22;
+    if(draw){ cctx.fillStyle=ink; cctx.fillRect(x,y,w,2); } y+=2+34;
 
-  // evidence bullets
-  const pts=(v.data_points&&v.data_points.length)? v.data_points.filter(Boolean) : [];
-  if(pts.length){
-    cctx.font='600 27px "Space Grotesk",sans-serif';
-    for(const p of pts){
-      cctx.fillStyle=mint; cctx.fillRect(x, y+4, 15, 15);
-      cctx.fillStyle=ink;
-      const wl=wrap(cctx, p, w-38); let yy=y;
-      wl.forEach((ln,i)=>{ cctx.fillText(ln, x+32, yy+18); yy+=(i<wl.length-1?34:0); });
-      y=yy+40;
+    y=eyebrow(draw,'THE READ',y);
+    cctx.font='500 28px "Space Grotesk",sans-serif';
+    y=block(draw, wrap(cctx, v.read||'', w), y, 40, ink);
+    y+=26;
+
+    const pts=(v.data_points&&v.data_points.length)? v.data_points.filter(Boolean):[];
+    if(pts.length){
+      cctx.font='600 26px "Space Grotesk",sans-serif';
+      for(const p of pts){
+        const wl=wrap(cctx, p, w-40);
+        if(draw){ cctx.fillStyle=mint; cctx.fillRect(x, y+6, 14, 14); cctx.fillStyle=ink;
+          wl.forEach((ln,i)=> cctx.fillText(ln, x+32, y+i*34)); }
+        y+=wl.length*34+10;
+      }
+      y+=8;
     }
-    y+=6;
+
+    if(v.unlock){
+      y=eyebrow(draw,'WHAT WOULD CHANGE IT',y);
+      cctx.font='500 italic 26px "Space Grotesk",sans-serif';
+      y=block(draw, wrap(cctx, v.unlock, w), y, 36, ink);
+    }
+    return y;
   }
 
-  // what would change it
-  if(v.unlock){
-    eyebrow('WHAT WOULD CHANGE IT');
-    cctx.fillStyle=ink; cctx.font='500 italic 27px "Space Grotesk",sans-serif';
-    for(const ln of wrap(cctx, v.unlock, w)){ cctx.fillText(ln, x, y+20); y+=36; }
-  }
-
-  // bottom CTA band
-  const bandH=118, by=H-m/2-bandH-8;
-  cctx.fillStyle=lime; cctx.fillRect(m/2, by, W-m, bandH);
-  cctx.fillStyle=ink;
-  cctx.font='900 38px "Archivo Black","Space Grotesk",sans-serif';
-  cctx.fillText('Get your own read →', x, by+54);
-  cctx.font='700 28px "Space Grotesk",sans-serif';
-  cctx.fillText('thegreenroom.mba', x, by+92);
+  // pass 1: measure → size the canvas to fit exactly, then pass 2: draw
+  const contentEnd = layout(false);
+  const H = Math.max(1120, Math.round(contentEnd + m/2 + 20));
+  cardCv.width = W; cardCv.height = H;         // resetting size clears the context
+  cctx.textBaseline='top'; cctx.textAlign='left';
+  cctx.fillStyle=ink; cctx.fillRect(0,0,W,H);
+  cctx.fillStyle=paper; cctx.fillRect(m/2, m/2, W-m, H-m);
+  layout(true);
 }
 function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 
@@ -1706,7 +1777,7 @@ function typeLoop(ts){
   if(state==='dialogue') typeTick(dt);
   requestAnimationFrame(typeLoop);
 }
-requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; requestAnimationFrame(loop); requestAnimationFrame(typeLoop); });
+requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; initAmbient(); requestAnimationFrame(loop); requestAnimationFrame(typeLoop); });
 
 /* ---- size the canvas to the viewport aspect so the floor fills the WHOLE screen ---- */
 function fit(){
