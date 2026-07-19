@@ -172,6 +172,14 @@
   .freerow{ display:flex; gap:7px; }
   .freerow .choice{ flex:1; justify-content:center; text-align:center; }
   .freesend{ background:var(--coral); }
+  .backrow{ margin-top:4px; }
+  .backbtn{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:clamp(11px,0.95vw,14px); font-weight:700;
+    color:var(--mint-dark); padding:4px 2px; letter-spacing:.02em;
+    text-decoration:underline; text-underline-offset:3px;
+  }
+  .backbtn:hover{ color:var(--ink); }
   .choice .k{
     font-family:"Press Start 2P"; font-size:8px; color:var(--ink); background:var(--coral);
     border-radius:4px; padding:4px 5px; margin-top:1px; flex:none;
@@ -811,8 +819,15 @@ let onDone = null;    // callback when queue finishes
 let awaitChoice = false;
 let awaitAction = false;
 
+let qStack = [];            // per-room checkpoint stack for "back to previous question"
+let _restoring = false;
+const MAX_FREE_TURNS = 2;   // per ✎ question: up to 2 typed exchanges
+const freeState = {};       // transient thread state per question key, reset each room
+
 function speak(lines, speaker, done){
   dq = lines.slice(); di = 0; onDone = done || null;
+  qStack = []; _restoring = false;
+  for(const k in freeState) delete freeState[k];
   setSpeaker(speaker);
   state='dialogue';
   show('#dialogue');
@@ -834,11 +849,14 @@ function nextLine(){
   if(line.speaker) setSpeaker(line.speaker);
   // action lines (open modal / generate)
   if(line.action){
-    awaitAction=true; dText.textContent=''; 
+    awaitAction=true; dText.textContent='';
     if(line.action==='profile'){ openProfile(); }
     else if(line.action==='generate'){ startGeneration(); }
     return;
   }
+  // arriving at a fresh question → checkpoint for back-navigation
+  if(line.choices && !_restoring){ qStack.push(snapshot()); }
+  _restoring=false;
   full = line.textFn ? line.textFn() : (line.text || '');
   typed=''; typing=true; typeAcc=0;
   renderTyped();
@@ -860,8 +878,42 @@ function typeTick(dt){
     typing=false; renderTyped();
     const line=dq[di];
     if(line.choices){ showChoices(line); }
+    else if(line._afterFree){ showFreeFollowup(line._afterFree); }
     else { dNext.classList.remove('hidden'); }
   }
+}
+
+/* ---- back-navigation: snapshot / restore state per question ---- */
+function snapshot(){
+  return {
+    dq: dq.slice(), di,
+    answers: Object.assign({}, answers),
+    freetext: Object.assign({}, freetext),
+    freeState: JSON.parse(JSON.stringify(freeState)),
+  };
+}
+function replaceObj(t, s){ for(const k in t) delete t[k]; Object.assign(t, s); }
+function restore(cp){
+  dq = cp.dq.slice(); di = cp.di;
+  replaceObj(answers, cp.answers);
+  replaceObj(freetext, cp.freetext);
+  replaceObj(freeState, cp.freeState);
+  _restoring=true; awaitChoice=false; awaitAction=false; typing=false;
+  dNext.classList.add('hidden');
+  nextLine();
+}
+function goBack(){
+  if(qStack.length < 2) return;   // already at the first question of this room
+  qStack.pop();                   // discard the current question
+  restore(qStack[qStack.length-1]); // re-present the previous one (stays on stack)
+}
+function appendBack(){
+  if(qStack.length < 2) return;
+  const bwrap=document.createElement('div'); bwrap.className='backrow';
+  const b=document.createElement('button'); b.className='backbtn';
+  b.textContent='↩ Back to previous question';
+  b.onclick=(e)=>{ e.stopPropagation(); goBack(); };
+  bwrap.appendChild(b); choicesEl.appendChild(bwrap);
 }
 
 function showChoices(line){
@@ -874,6 +926,7 @@ function showChoices(line){
     b.onclick=(e)=>{ e.stopPropagation(); ch.free ? openFreeText(line) : pickChoice(line,ch); };
     choicesEl.appendChild(b);
   });
+  appendBack();
 }
 function pickChoice(line,ch){
   if(ch.free){ openFreeText(line); return; }
@@ -883,67 +936,97 @@ function pickChoice(line,ch){
 }
 function clearChoices(){ awaitChoice=false; choicesEl.innerHTML=''; }
 
-// ---- free-text: type your own answer, mentor reacts live (stage:'react') ----
-function openFreeText(line){
+// ---- free-text: type your own answer, mentor reacts live (stage:'react'), up to MAX_FREE_TURNS ----
+function openFreeText(line, backFn){
   awaitChoice=true;
   choicesEl.innerHTML='';
   const wrap=document.createElement('div'); wrap.className='freewrap';
   const ta=document.createElement('textarea'); ta.className='freein'; ta.rows=2;
-  ta.placeholder='Say it in your own words…'; ta.maxLength=600;
+  ta.placeholder='Say it in your own words…'; ta.maxLength=800;
   const row=document.createElement('div'); row.className='freerow';
-  const back=document.createElement('button'); back.className='choice'; back.textContent='← back to options';
+  const back=document.createElement('button'); back.className='choice';
+  back.textContent = backFn ? '← never mind' : '← back to options';
   const send=document.createElement('button'); send.className='choice freesend'; send.textContent='Say it →';
-  back.onclick=(e)=>{ e.stopPropagation(); showChoices(line); };
+  back.onclick=(e)=>{ e.stopPropagation(); backFn ? backFn() : showChoices(line); };
   send.onclick=(e)=>{ e.stopPropagation(); const t=ta.value.trim(); if(!t){ ta.focus(); return; } submitFreeText(line,t); };
   ta.addEventListener('keydown',(e)=>{ e.stopPropagation(); if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); send.click(); } });
   row.appendChild(back); row.appendChild(send);
   wrap.appendChild(ta); wrap.appendChild(row);
   choicesEl.appendChild(wrap);
+  if(!backFn) appendBack();       // first turn: allow jumping to previous question
   setTimeout(()=>ta.focus(),40);
 }
 async function submitFreeText(line, text){
-  if(line.key){ answers[line.key]='custom'; freetext[line.key]=text; }
+  const key=line.key;
+  const st = freeState[key] || (freeState[key]={turns:0, thread:[]});
+  st.turns++;
+  st.thread.push({role:'you', text});
+  if(key){ answers[key]='custom';
+    freetext[key]= st.thread.filter(m=>m.role==='you').map(m=>m.text).join('  /  '); }
   awaitChoice=false; clearChoices();
   awaitAction=true;                                   // block taps while the mentor thinks
   setSpeaker('mentor');
   dText.innerHTML='<span class="cursor show">▌</span>';
-  const reply = await reactMentor(line.key, line.q || '', text);
+  const isFinal = st.turns >= MAX_FREE_TURNS;
+  const reply = await reactMentor(key, line.q || '', text, st.thread.slice(0,-1), isFinal);
+  st.thread.push({role:'mentor', text:reply});
   const echo = text.length>150 ? text.slice(0,150)+'…' : text;
-  dq.splice(di+1, 0, {speaker:'you', text:echo}, {speaker:'mentor', text:reply});
+  dq.splice(di+1, 0, {speaker:'you', text:echo}, {speaker:'mentor', text:reply, _afterFree: isFinal? null : {line, st}});
   awaitAction=false;
   di++; nextLine();
 }
-async function reactMentor(key, promptText, text){
+function showFreeFollowup(ctx){
+  awaitChoice=true;                 // buttons control the flow; block background advance
+  choicesEl.innerHTML='';
+  const row=document.createElement('div'); row.className='freerow';
+  const respond=document.createElement('button'); respond.className='choice';
+  respond.textContent='↩ Respond'; respond.onclick=(e)=>{ e.stopPropagation(); openFreeText(ctx.line, ()=>showFreeFollowup(ctx)); };
+  const move=document.createElement('button'); move.className='choice freesend';
+  move.textContent='→ Move on'; move.onclick=(e)=>{ e.stopPropagation(); awaitChoice=false; clearChoices(); di++; nextLine(); };
+  row.appendChild(respond); row.appendChild(move);
+  choicesEl.appendChild(row);
+  appendBack();
+}
+async function reactMentor(key, promptText, text, thread, isFinal){
   if(WEBHOOK_URL){
     try{
       const res=await fetch(WEBHOOK_URL,{ method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ stage:'react', profile, signals:profile.signals, question:key, prompt_text:promptText, text, answers }) });
+        body: JSON.stringify({ stage:'react', profile, signals:profile.signals, question:key, prompt_text:promptText, text, thread:(thread||[]), final:!!isFinal, answers }) });
       if(res.ok){ const d=await res.json(); const r=(d.reply||'').trim(); if(r) return r; }
     }catch(e){}
   }
-  return fallbackReact(key, text);
+  return fallbackReact(key, text, isFinal);
 }
-function fallbackReact(key, text){
+function fallbackReact(key, text, isFinal){
   const nm=firstName();
+  if(isFinal){
+    const fin=["Alright — I've got what I need on that. Keep walking.",
+      "Fair enough. Let's weigh it with the rest and move on.",
+      "Noted, and I'll factor it into the call. Onward."];
+    return fin[Math.floor(Math.random()*fin.length)];
+  }
   const pool=[
-    "Noted — and I'll hold you to it when I call this.",
-    "Fair. Let's see if the rest of your answers back that up.",
-    (nm?nm+', that':"That")+"'s honest. Keep walking.",
-    "Okay. That tells me more than the buttons would have."
+    "Say more — what's underneath that?",
+    "Okay. Be honest: is that the real reason, or the tidy one?",
+    (nm?nm+', push':"Push")+" on that — what would it actually change for you?",
+    "Interesting. What makes you so sure?"
   ];
   return pool[Math.floor(Math.random()*pool.length)];
 }
 
 function advanceDialogue(){
-  if(awaitChoice) return;      // must pick a choice
-  if(awaitAction) return;      // modal/generation controls flow
+  if(awaitChoice) return;      // must pick a choice / button
+  if(awaitAction) return;      // modal/generation/react controls flow
   if(typing){ typed=full; typing=false; renderTyped();
     const line=dq[di];
-    if(line.choices) showChoices(line); else dNext.classList.remove('hidden');
+    if(line.choices) showChoices(line);
+    else if(line._afterFree) showFreeFollowup(line._afterFree);
+    else dNext.classList.remove('hidden');
     return;
   }
   const line=dq[di];
   if(line.choices) return;     // wait for pick
+  if(line._afterFree) return;  // wait for Respond / Move on
   di++; nextLine();
 }
 
@@ -1023,7 +1106,10 @@ function dealDialogue(){
       {label:"...away from my current job", value:'away'},
       {label:"...not sure — and I know that's the problem", value:'unsure'},
     ]},
-    {text: nm ? `You've been building toward ${nm}. Noted. Keep going.` : "Noted. Keep going — the numbers are next door."},
+    {textFn: ()=>{ const nm=nameBit();
+      if(answers.running==='away') return nm? `So you want out of ${nm}. Noted — let's find out if a degree is really the exit.` : "So you want out. Noted — let's find out if a degree is really the exit.";
+      if(answers.running==='unsure') return "Not sure yet — and you know that's the problem. That's honest. Keep going.";
+      return nm? `You've put real time into ${nm}. Noted. Keep going — the numbers are next door.` : "Noted. Keep going — the numbers are next door."; }},
   ],'mentor', ()=> unlockDoor(26, markDone('deal')));
 }
 
@@ -1545,6 +1631,7 @@ const KMAP={ ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',
 addEventListener('keydown', e=>{
   // choices via number keys
   if(state==='dialogue' && awaitChoice && /^[1-9]$/.test(e.key)){
+    if(choicesEl.querySelector('.freein')) return;   // typing free-text: let the box handle keys
     const line=dq[di]; const i=parseInt(e.key)-1;
     if(line.choices && line.choices[i]){ pickChoice(line,line.choices[i]); e.preventDefault(); }
     return;
