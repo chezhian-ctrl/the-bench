@@ -1,0 +1,1441 @@
+<!--
+  THE BENCH — "Is an MBA Worth It?"
+  A top-down, Pokémon-style walk through a coworking floor. One mentor voice the
+  whole way. At the end, a real Claude call reads your inputs and hands you a
+  screenshot-able verdict card. Falls back to a deterministic read if the API
+  is unavailable, so the loop never dead-ends.
+
+  Architecture note (per the brief): this is the FRONTEND — the game + card.
+  In production the verdict call, the session logging (Sheets), and the
+  share/email follow-up live behind an n8n webhook. Here the Claude call is made
+  directly so the whole loop is playable in one file.
+-->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>The Bench — Is an MBA Worth It?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --paper:#F1E9D8;
+    --ink:#171512;
+    --coral:#EE4B36;
+    --coral-dark:#C63723;
+    --amber:#F0A63F;
+    --plant:#3E8E5A;
+    --wood:#9C6B3F;
+    --glass:#7C93A3;
+    --line:#2A2620;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(120% 90% at 50% -10%, #2b2620 0%, #14110d 60%, #0d0b08 100%);
+    color:var(--paper);
+    font-family:"Space Grotesk", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    display:flex; align-items:center; justify-content:center;
+    padding:16px; overflow:hidden;
+    touch-action:none;
+  }
+  .frame{
+    position:relative;
+    width:100%; max-width:520px;
+  }
+
+  /* ---- the game viewport ---- */
+  #stage{
+    position:relative;
+    width:100%;
+    aspect-ratio: 240 / 176;
+    background:#0d0b08;
+    border-radius:14px;
+    overflow:hidden;
+    box-shadow:0 0 0 3px var(--ink), 0 24px 60px rgba(0,0,0,.55), 0 2px 0 rgba(255,255,255,.04) inset;
+  }
+  #game{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    image-rendering:pixelated;
+    image-rendering:crisp-edges;
+    display:block;
+  }
+
+  /* soft scanline / vignette to sell the "screen" */
+  #stage::after{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background:
+      radial-gradient(130% 110% at 50% 40%, transparent 60%, rgba(0,0,0,.35) 100%);
+    mix-blend-mode:multiply;
+  }
+
+  /* ---------- overlays ---------- */
+  .layer{ position:absolute; inset:0; z-index:5; }
+  .hidden{ display:none !important; }
+
+  /* Title */
+  #title{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:22px;
+    background:
+      linear-gradient(180deg, rgba(20,17,13,.72), rgba(20,17,13,.86)),
+      repeating-linear-gradient(45deg, rgba(238,75,54,.10) 0 14px, transparent 14px 28px);
+    backdrop-filter: blur(1px);
+  }
+  #title .kicker{
+    font-family:"Press Start 2P"; font-size:8px; letter-spacing:2px;
+    color:var(--coral); margin-bottom:14px; text-transform:uppercase;
+  }
+  #title h1{
+    font-family:"Archivo Black", sans-serif; font-weight:900;
+    font-size:clamp(26px,7.4vw,40px); line-height:.98; margin:0;
+    color:var(--paper); letter-spacing:-.5px;
+  }
+  #title h1 em{ color:var(--coral); font-style:normal; }
+  #title .sub{
+    margin:14px 0 22px; max-width:34ch; font-size:13px; line-height:1.5;
+    color:rgba(241,233,216,.78);
+  }
+  .btn{
+    font-family:"Press Start 2P"; font-size:10px; letter-spacing:1px;
+    background:var(--coral); color:#fff; border:none; cursor:pointer;
+    padding:14px 20px; border-radius:10px;
+    box-shadow:0 4px 0 var(--coral-dark), 0 8px 18px rgba(238,75,54,.35);
+    transition:transform .06s ease, box-shadow .06s ease;
+    text-transform:uppercase;
+  }
+  .btn:active{ transform:translateY(3px); box-shadow:0 1px 0 var(--coral-dark); }
+  .btn.ghost{
+    background:transparent; color:var(--paper);
+    box-shadow:inset 0 0 0 2px rgba(241,233,216,.5);
+  }
+  .btn.ghost:active{ transform:translateY(2px); box-shadow:inset 0 0 0 2px rgba(241,233,216,.5); }
+  #title .controls{ margin-top:16px; font-size:11px; color:rgba(241,233,216,.5); }
+  #title .controls b{ color:rgba(241,233,216,.8); font-weight:600; }
+
+  /* Dialogue box (Pokémon-style) */
+  #dialogue{ display:flex; flex-direction:column; justify-content:flex-end; padding:10px; pointer-events:none; }
+  .box{
+    pointer-events:auto;
+    background:var(--paper); color:var(--ink);
+    border-radius:10px; border:3px solid var(--ink);
+    box-shadow:0 6px 0 rgba(0,0,0,.35), 0 0 0 3px rgba(241,233,216,.15) inset;
+    padding:12px 13px 13px;
+    position:relative;
+  }
+  .speaker{
+    position:absolute; top:-12px; left:12px;
+    font-family:"Press Start 2P"; font-size:8px; letter-spacing:1px;
+    background:var(--ink); color:var(--paper);
+    padding:5px 8px; border-radius:6px; text-transform:uppercase;
+  }
+  .speaker.mentor{ background:var(--coral); }
+  #dtext{
+    min-height:44px; font-size:14px; line-height:1.42; font-weight:500;
+    white-space:pre-wrap;
+  }
+  .cursor{ display:inline-block; width:9px; }
+  .cursor.show{ animation:blink .8s steps(1) infinite; }
+  @keyframes blink{ 50%{opacity:0} }
+  #dnext{
+    position:absolute; right:12px; bottom:9px;
+    width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
+    border-top:9px solid var(--ink); animation:bob .7s ease-in-out infinite;
+  }
+  @keyframes bob{ 50%{ transform:translateY(3px) } }
+  #choices{ display:flex; flex-direction:column; gap:7px; margin-top:11px; }
+  .choice{
+    pointer-events:auto; text-align:left; cursor:pointer;
+    background:#fff; color:var(--ink);
+    border:2px solid var(--ink); border-radius:8px;
+    padding:9px 11px; font-size:13px; font-weight:600; font-family:inherit;
+    display:flex; gap:9px; align-items:flex-start;
+    box-shadow:0 3px 0 rgba(0,0,0,.2);
+    transition:transform .05s ease, background .12s ease;
+  }
+  .choice:hover{ background:var(--paper); }
+  .choice:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.2); }
+  .choice .k{
+    font-family:"Press Start 2P"; font-size:8px; color:#fff; background:var(--coral);
+    border-radius:4px; padding:4px 5px; margin-top:1px; flex:none;
+  }
+
+  /* Profile modal */
+  #profile{ display:flex; align-items:center; justify-content:center; padding:16px;
+    background:rgba(13,11,8,.82); backdrop-filter:blur(2px); }
+  .card-modal{
+    width:100%; max-width:400px; background:var(--paper); color:var(--ink);
+    border:3px solid var(--ink); border-radius:14px; padding:16px;
+    box-shadow:0 20px 50px rgba(0,0,0,.5);
+  }
+  .card-modal h3{ font-family:"Archivo Black"; font-size:17px; margin:0 0 4px; }
+  .card-modal p{ font-size:12.5px; line-height:1.45; margin:0 0 10px; color:#4a453c; }
+  #purl{
+    width:100%;
+    border:2px solid var(--ink); border-radius:9px; padding:12px 10px;
+    font-family:inherit; font-size:13px; background:#fff; color:var(--ink);
+  }
+  #purl:focus{ outline:none; border-color:var(--coral); }
+  .perr{ color:var(--coral); font-size:11px; font-weight:700; margin-top:7px; }
+  .hint{ font-size:10.5px; color:#6a655b; margin-top:8px; line-height:1.4; }
+  .row{ display:flex; gap:9px; margin-top:11px; }
+  .row .btn{ flex:1; text-align:center; }
+  .mini{ font-family:"Press Start 2P"; font-size:9px; }
+
+  /* Generating */
+  #loading{ display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; padding:20px; background:rgba(13,11,8,.9); }
+  #loading .spin{
+    width:34px;height:34px;border-radius:50%;
+    border:5px solid rgba(241,233,216,.2); border-top-color:var(--coral);
+    animation:rot .8s linear infinite; margin-bottom:16px;
+  }
+  @keyframes rot{ to{ transform:rotate(360deg) } }
+  #loadmsg{ font-family:"Press Start 2P"; font-size:9px; letter-spacing:1px; color:var(--paper);
+    line-height:1.8; max-width:26ch; }
+
+  /* Verdict screen */
+  #verdict{ display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+    padding:14px; overflow:auto; background:rgba(13,11,8,.94); }
+  #verdict .vhead{
+    font-family:"Press Start 2P"; font-size:8px; letter-spacing:1px; color:var(--coral);
+    margin:2px 0 10px; text-transform:uppercase; text-align:center;
+  }
+  #cardWrap{ width:100%; max-width:300px; }
+  #cardCanvas{ width:100%; height:auto; border-radius:10px; display:block;
+    box-shadow:0 16px 40px rgba(0,0,0,.55); }
+  #vactions{ display:flex; gap:8px; width:100%; max-width:300px; margin-top:12px; }
+  #vactions .btn{ flex:1; text-align:center; padding:12px 8px; }
+  #vsecondary{ display:flex; gap:8px; width:100%; max-width:300px; margin-top:8px; }
+  #vsecondary .btn{ flex:1; text-align:center; }
+  #toast{
+    position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
+    background:var(--ink); color:var(--paper); font-size:12px; font-weight:600;
+    padding:9px 13px; border-radius:8px; opacity:0; transition:opacity .2s ease;
+    z-index:30; pointer-events:none; border:1px solid rgba(241,233,216,.2);
+  }
+  #toast.show{ opacity:1; }
+
+  /* On-screen controls (touch) */
+  #touch{ position:absolute; inset:0; z-index:4; pointer-events:none; }
+  .dpad{ position:absolute; left:12px; bottom:12px; width:112px; height:112px; }
+  .dbtn{
+    position:absolute; width:38px; height:38px; pointer-events:auto;
+    background:rgba(23,21,18,.72); border:2px solid rgba(241,233,216,.28);
+    border-radius:8px; color:var(--paper); display:flex; align-items:center; justify-content:center;
+    -webkit-user-select:none; user-select:none; touch-action:none;
+  }
+  .dbtn:active{ background:var(--coral); }
+  .dbtn.up{ left:37px; top:0 } .dbtn.down{ left:37px; top:74px }
+  .dbtn.left{ left:0; top:37px } .dbtn.right{ left:74px; top:37px }
+  .dbtn svg{ width:16px;height:16px; fill:currentColor }
+  #abtn{
+    position:absolute; right:14px; bottom:26px; width:64px; height:64px; pointer-events:auto;
+    border-radius:50%; background:var(--coral); border:3px solid #fff2;
+    color:#fff; font-family:"Press Start 2P"; font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 5px 0 var(--coral-dark); touch-action:none; -webkit-user-select:none; user-select:none;
+  }
+  #abtn:active{ transform:translateY(3px); box-shadow:0 2px 0 var(--coral-dark); }
+  /* only show touch controls on coarse pointers */
+  @media (pointer:fine){ #touch{ display:none; } }
+
+  .credit{
+    position:absolute; left:0; right:0; bottom:-26px; text-align:center;
+    font-size:11px; color:rgba(241,233,216,.35);
+  }
+  .credit b{ color:rgba(241,233,216,.55); font-weight:600; }
+</style>
+
+<div class="frame">
+  <div id="stage">
+    <canvas id="game" width="240" height="176"></canvas>
+
+    <!-- touch controls -->
+    <div id="touch" class="layer">
+      <div class="dpad">
+        <div class="dbtn up"    data-dir="up"><svg viewBox="0 0 16 16"><path d="M8 3l5 7H3z"/></svg></div>
+        <div class="dbtn down"  data-dir="down"><svg viewBox="0 0 16 16"><path d="M8 13L3 6h10z"/></svg></div>
+        <div class="dbtn left"  data-dir="left"><svg viewBox="0 0 16 16"><path d="M3 8l7-5v10z"/></svg></div>
+        <div class="dbtn right" data-dir="right"><svg viewBox="0 0 16 16"><path d="M13 8L6 13V3z"/></svg></div>
+      </div>
+      <div id="abtn">A</div>
+    </div>
+
+    <!-- title -->
+    <div id="title" class="layer">
+      <div class="kicker">The Bench · floor 11 · 11:00 PM</div>
+      <h1>Is an MBA<br><em>Worth It?</em></h1>
+      <div class="sub">You've read every article. Walk the floor instead. Someone up here will look at your actual situation and just tell you.</div>
+      <button class="btn" id="startBtn">Enter the floor</button>
+      <div class="controls"><b>Move:</b> arrows / WASD &nbsp;·&nbsp; <b>Talk:</b> space</div>
+    </div>
+
+    <!-- dialogue -->
+    <div id="dialogue" class="layer hidden">
+      <div class="box">
+        <div class="speaker" id="dspeaker">MENTOR</div>
+        <div id="dtext"></div>
+        <div id="dnext" class="hidden"></div>
+        <div id="choices"></div>
+      </div>
+    </div>
+
+    <!-- profile modal -->
+    <div id="profile" class="layer hidden">
+      <div class="card-modal">
+        <h3>Drop your LinkedIn.</h3>
+        <p>Paste your profile URL — I'll pull your headline, roles and history so I read you properly, not off a blank page.</p>
+        <input id="purl" type="url" inputmode="url" autocomplete="url" spellcheck="false"
+               placeholder="https://www.linkedin.com/in/your-handle" />
+        <div id="perr" class="perr hidden">That doesn't look like a LinkedIn profile URL.</div>
+        <div class="row">
+          <button class="btn mini" id="pUse">Pull it</button>
+          <button class="btn ghost mini" id="pSkip">Skip</button>
+        </div>
+        <div class="hint">Skip and I'll still read you — just off your answers alone.</div>
+      </div>
+    </div>
+
+    <!-- loading -->
+    <div id="loading" class="layer hidden">
+      <div class="spin"></div>
+      <div id="loadmsg">READING YOU...</div>
+    </div>
+
+    <!-- verdict -->
+    <div id="verdict" class="layer hidden">
+      <div class="vhead">Your read · The Bench</div>
+      <div id="cardWrap"><canvas id="cardCanvas" width="1080" height="1350"></canvas></div>
+      <div id="vactions">
+        <button class="btn mini" id="dlBtn">Download</button>
+        <button class="btn mini" id="shareBtn">Share</button>
+      </div>
+      <div id="vsecondary">
+        <button class="btn ghost mini" id="copyBtn">Copy the line</button>
+        <button class="btn ghost mini" id="againBtn">Play again</button>
+      </div>
+    </div>
+
+    <div id="toast"></div>
+  </div>
+  <div class="credit">A frontend prototype · verdict powered by <b>Claude</b> · card is the product, the game is the wrapper</div>
+</div>
+
+<script>
+/* ============================================================= *
+ *  CONSTANTS + WORLD
+ * ============================================================= */
+const TILE = 16;
+const VIEW_W = 240, VIEW_H = 176;            // internal canvas = 15 x 11 tiles
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const COL = {
+  paper:'#F1E9D8', paperDark:'#E4D8BF', ink:'#171512',
+  wall:'#2A241D', wallTop:'#453A2D', wallEdge:'#5A4B3A',
+  floor:'#D9C9A6', floorLine:'#CCB98F', floorAlt:'#DFD1B0',
+  coral:'#EE4B36', amber:'#F0A63F', plant:'#3E8E5A', plantDark:'#2E6E44',
+  wood:'#9C6B3F', woodDark:'#7A5230', glass:'#7C93A3', glassLite:'#A9BEC9',
+  rug:'#C97B5B', rugEdge:'#A85E42', shadow:'rgba(0,0,0,.16)',
+  skin:'#E3B08A', skin2:'#C88F6A', hair:'#2E241C',
+  screen:'#39424A', screenOn:'#8FD0C4', metal:'#8B8377'
+};
+
+const VOID=0, FLOOR=1, WALL=2, DOOR=3, RUG=4;
+
+// Map: 15 wide, 40 tall. Rooms stacked; player climbs bottom -> top.
+const MAP_W = 15, MAP_H = 40;
+const CX = 7; // center column (doors + clear path)
+
+// room interior row ranges (top -> bottom), shared wall carries the door
+const ROOMS = {
+  verdict:      { y0:3,  y1:7,  name:'The Verdict Room' },
+  alternatives: { y0:9,  y1:13, name:'The Alternatives Room' },
+  network:      { y0:15, y1:19, name:'The Network Room' },
+  numbers:      { y0:21, y1:25, name:'The Numbers Room' },
+  deal:         { y0:27, y1:31, name:'The Deal Room' },
+  reception:    { y0:33, y1:37, name:'Reception' },
+};
+// interiors span x 3..11 (walls at 2 and 12)
+const RX0=3, RX1=11;
+
+// build grid
+const grid = Array.from({length:MAP_H}, ()=> new Array(MAP_W).fill(VOID));
+const doorAt = {};      // "x,y" -> {locked}
+const solid  = new Set();// blocked furniture/npc tiles "x,y"
+const interact = {};    // "x,y" -> descriptor
+const decos = [];       // {tx,ty,type} drawn on top of floor (non-solid unless in solid set)
+
+function key(x,y){ return x+','+y; }
+
+// carve a room
+function carveRoom(r){
+  for(let y=r.y0-1; y<=r.y1+1; y++){
+    for(let x=RX0-1; x<=RX1+1; x++){
+      if(y===r.y0-1 || y===r.y1+1 || x===RX0-1 || x===RX1+1){
+        if(grid[y][x]===VOID) grid[y][x]=WALL;
+      } else {
+        grid[y][x]=FLOOR;
+      }
+    }
+  }
+}
+Object.values(ROOMS).forEach(carveRoom);
+
+// doors in shared walls (the wall row between two rooms), all locked to start
+function addDoor(y){ grid[y][CX]=DOOR; doorAt[key(CX,y)]={locked:true}; }
+addDoor(32); // reception -> deal
+addDoor(26); // deal -> numbers
+addDoor(20); // numbers -> network
+addDoor(14); // network -> alternatives
+addDoor(8);  // alternatives -> verdict
+
+// entrance flourish at very bottom of reception (cosmetic door, opens "outside" = void, stays closed)
+grid[38][CX]=WALL;
+
+// -------- furniture / decor + interactables --------
+function putSolid(x,y,type){ solid.add(key(x,y)); decos.push({tx:x,ty:y,type}); }
+function putDeco(x,y,type){ decos.push({tx:x,ty:y,type}); }
+function putRug(x0,y0,w,h){ for(let y=y0;y<y0+h;y++)for(let x=x0;x<x0+w;x++){ if(grid[y][x]===FLOOR){ grid[y][x]=RUG; } } }
+
+// Reception (33..37): mentor near the up-door, sofa + plant + rug + desk
+putRug(5,34,5,3);
+putSolid(4,34,'plant'); putSolid(10,34,'plant');
+putSolid(4,36,'sofa'); putSolid(5,36,'sofa');
+putDeco(9,37,'mat');
+// reception mentor
+solid.add(key(6,34));
+interact[key(6,34)] = { type:'npc', who:'mentor', room:'reception', tile:[6,34], face:'down', done:false };
+decos.push({tx:6,ty:34,type:'mentor'});
+
+// window strips on some outer walls (deco only)
+[ [2,4],[12,6],[2,10],[12,12],[2,16],[12,18],[2,22],[12,24],[2,28],[12,30] ].forEach(([x,y])=>putDeco(x,y,'window'));
+
+// Deal room (27..31): terminal + desks + plant
+putSolid(9,28,'desk'); putSolid(10,28,'desk');
+putSolid(4,30,'plant');
+solid.add(key(5,28));
+interact[key(5,28)] = { type:'terminal', room:'deal', tile:[5,28], face:'left', done:false };
+decos.push({tx:5,ty:28,type:'terminal'});
+
+// Numbers room (21..25): terminal + desks + plant
+putSolid(4,22,'desk'); putSolid(5,22,'desk');
+putSolid(10,24,'plant');
+solid.add(key(9,22));
+interact[key(9,22)] = { type:'terminal', room:'numbers', tile:[9,22], face:'right', done:false };
+decos.push({tx:9,ty:22,type:'terminal'});
+
+// Network room (15..19): terminal + sofa cluster
+putRug(6,16,4,3);
+putSolid(10,16,'sofa'); putSolid(10,17,'sofa');
+putSolid(4,18,'plant');
+solid.add(key(5,16));
+interact[key(5,16)] = { type:'terminal', room:'network', tile:[5,16], face:'left', done:false };
+decos.push({tx:5,ty:16,type:'terminal'});
+
+// Alternatives room (9..13): terminal + desks
+putSolid(4,10,'desk'); putSolid(5,10,'desk');
+putSolid(4,12,'plant');
+solid.add(key(9,10));
+interact[key(9,10)] = { type:'terminal', room:'alternatives', tile:[9,10], face:'right', done:false };
+decos.push({tx:9,ty:10,type:'terminal'});
+
+// Verdict room (3..7): mentor at a big desk, rug, two plants
+putRug(5,5,5,2);
+putSolid(4,4,'plant'); putSolid(10,4,'plant');
+putSolid(6,4,'bigdesk'); putSolid(7,4,'bigdesk'); putSolid(8,4,'bigdesk');
+solid.add(key(7,6));
+interact[key(7,6)] = { type:'npc', who:'mentor', room:'verdict', tile:[7,6], face:'up', done:false };
+decos.push({tx:7,ty:6,type:'mentor'});
+
+/* ============================================================= *
+ *  PLAYER + CAMERA + MOVEMENT
+ * ============================================================= */
+const DIRS = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0] };
+const player = {
+  tx:CX, ty:36, px:CX*TILE, py:36*TILE,
+  dir:'up', moving:false, prog:0, fromX:CX, fromY:36, toX:CX, toY:36,
+  frame:0, animT:0, path:[]
+};
+let camY = 0;
+
+const keyState = { up:false, down:false, left:false, right:false };
+let objective = interact[key(6,34)]; // current thing to walk to
+
+function inBounds(x,y){ return x>=0&&x<MAP_W&&y>=0&&y<MAP_H; }
+function walkable(x,y){
+  if(!inBounds(x,y)) return false;
+  const t = grid[y][x];
+  if(t===WALL||t===VOID) return false;
+  if(t===DOOR){ const d=doorAt[key(x,y)]; return d ? !d.locked : true; }
+  if(solid.has(key(x,y))) return false;
+  return true; // FLOOR or RUG
+}
+function frontTile(){ const [dx,dy]=DIRS[player.dir]; return [player.tx+dx, player.ty+dy]; }
+
+function tryStartMove(dir){
+  player.dir = dir;
+  const [dx,dy]=DIRS[dir];
+  const nx=player.tx+dx, ny=player.ty+dy;
+  if(walkable(nx,ny)){
+    player.moving=true; player.prog=0;
+    player.fromX=player.tx; player.fromY=player.ty;
+    player.toX=nx; player.toY=ny;
+    return true;
+  }
+  return false;
+}
+
+// BFS pathfinding for tap-to-move
+function findPath(sx,sy,gx,gy){
+  if(!walkable(gx,gy)) return null;
+  const q=[[sx,sy]]; const prev={}; prev[key(sx,sy)]=null; let head=0;
+  while(head<q.length){
+    const [cx,cy]=q[head++];
+    if(cx===gx&&cy===gy) break;
+    for(const d of ['up','down','left','right']){
+      const [dx,dy]=DIRS[d]; const nx=cx+dx, ny=cy+dy; const k=key(nx,ny);
+      if(walkable(nx,ny) && !(k in prev)){ prev[k]=[cx,cy]; q.push([nx,ny]); }
+    }
+  }
+  if(!(key(gx,gy) in prev)) return null;
+  const path=[]; let c=[gx,gy];
+  while(c){ path.push(c); c=prev[key(c[0],c[1])]; }
+  path.reverse(); path.shift(); // drop current tile
+  return path;
+}
+
+/* ============================================================= *
+ *  RENDER
+ * ============================================================= */
+function px(x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(x,y,w,h); }
+
+function drawFloorTile(sx,sy,alt){
+  px(sx,sy,TILE,TILE, alt?COL.floorAlt:COL.floor);
+  ctx.fillStyle=COL.floorLine;
+  ctx.fillRect(sx,sy+TILE-1,TILE,1);
+  ctx.fillRect(sx+ (alt?8:0), sy, 1, TILE);
+}
+function drawRugTile(sx,sy){
+  px(sx,sy,TILE,TILE,COL.rug);
+  px(sx,sy,TILE,2,COL.rugEdge); px(sx,sy+TILE-2,TILE,2,COL.rugEdge);
+  px(sx,sy,2,TILE,COL.rugEdge); px(sx+TILE-2,sy,2,TILE,COL.rugEdge);
+  px(sx+4,sy+4,TILE-8,TILE-8,'rgba(0,0,0,.06)');
+}
+function drawWallTile(sx,sy,x,y){
+  // body
+  px(sx,sy,TILE,TILE,COL.wall);
+  // "top" lip when floor is below (fake 2.5D)
+  const below = inBounds(x,y+1)&&(grid[y+1][x]===FLOOR||grid[y+1][x]===RUG||grid[y+1][x]===DOOR);
+  if(below){
+    px(sx,sy,TILE,5,COL.wallTop);
+    px(sx,sy+5,TILE,1,COL.wallEdge);
+    px(sx,sy+TILE-3,TILE,3,'rgba(0,0,0,.25)');
+  } else {
+    px(sx,sy,TILE,3,COL.wallTop);
+  }
+}
+function drawDoorTile(sx,sy,x,y,locked){
+  drawFloorTile(sx,sy,false);
+  // frame
+  px(sx,sy,TILE,4,COL.wallTop);
+  px(sx,sy,3,TILE,COL.wallTop); px(sx+TILE-3,sy,3,TILE,COL.wallTop);
+  if(locked){
+    px(sx+3,sy+3,TILE-6,TILE-6,COL.woodDark);
+    px(sx+TILE/2-1,sy+TILE/2-1,3,3,COL.amber); // lock
+  } else {
+    px(sx+3,sy+3,TILE-6,3,'rgba(0,0,0,.18)'); // open threshold
+  }
+}
+
+function drawDeco(d,sx,sy){
+  switch(d.type){
+    case 'plant':
+      px(sx+4,sy+9,8,6,COL.wood); px(sx+4,sy+9,8,2,COL.woodDark);
+      px(sx+5,sy+2,6,8,COL.plantDark); px(sx+3,sy+4,5,6,COL.plant);
+      px(sx+8,sy+3,5,6,COL.plant); px(sx+6,sy+1,4,4,COL.plant);
+      break;
+    case 'desk':
+      px(sx+1,sy+6,TILE-2,7,COL.wood); px(sx+1,sy+6,TILE-2,2,'rgba(255,255,255,.12)');
+      px(sx+1,sy+11,TILE-2,2,COL.woodDark);
+      px(sx+4,sy+1,8,6,COL.screen); px(sx+5,sy+2,6,4,COL.screenOn);
+      break;
+    case 'bigdesk':
+      px(sx,sy+7,TILE,7,COL.woodDark); px(sx,sy+7,TILE,2,COL.wood);
+      px(sx,sy+12,TILE,2,'rgba(0,0,0,.3)');
+      break;
+    case 'sofa':
+      px(sx+1,sy+4,TILE-2,10,COL.glass); px(sx+1,sy+3,TILE-2,3,COL.glassLite);
+      px(sx+1,sy+4,3,10,COL.glassLite); px(sx+TILE-4,sy+4,3,10,COL.glassLite);
+      px(sx+4,sy+8,TILE-8,4,'rgba(0,0,0,.1)');
+      break;
+    case 'window':
+      px(sx+2,sy+3,TILE-4,10,COL.glass);
+      px(sx+2,sy+3,TILE-4,2,COL.glassLite);
+      px(sx+TILE/2-1,sy+3,2,10,COL.wall);
+      px(sx+3,sy+4,3,3,COL.glassLite);
+      break;
+    case 'mat':
+      px(sx+2,sy+5,TILE-4,8,COL.rugEdge); px(sx+4,sy+7,TILE-8,4,COL.rug);
+      break;
+    case 'terminal': {
+      // kiosk with glowing screen
+      px(sx+5,sy+11,6,4,COL.metal); px(sx+4,sy+14,8,2,COL.woodDark);
+      px(sx+2,sy+1,12,11,COL.ink);
+      const on = COL.screenOn;
+      px(sx+3,sy+2,10,9, on);
+      // simple "?" made of blocks, gentle flicker
+      const t=Math.floor(perf/400)%2;
+      const q = t? 'rgba(23,21,18,.9)':'rgba(23,21,18,.55)';
+      px(sx+6,sy+3,4,2,q); px(sx+9,sy+4,1,2,q); px(sx+7,sy+6,2,1,q); px(sx+7,sy+8,2,1,q);
+      break;
+    }
+    case 'mentor':
+      drawAvatar(sx,sy, d.face||'down', 0, MENTOR_COLORS);
+      break;
+  }
+}
+
+const PLAYER_COLORS = { skin:COL.skin, skin2:COL.skin2, hair:COL.hair, top:COL.coral, topSh:COL.coralDark||'#C63723', pants:'#3A3630', shoes:'#211E19' };
+const MENTOR_COLORS = { skin:'#D6A07A', skin2:'#BC8560', hair:'#B9B2A6', top:'#2C2A28', topSh:'#1B1A18', pants:'#3C3A36', shoes:'#171512' };
+
+// little top-down person, 4 directions, 2 frames
+function drawAvatar(sx,sy,dir,frame,c){
+  const ox=sx+2, oy=sy+1; // 12x14 figure inside tile
+  // shadow
+  px(sx+3,sy+14,10,2,'rgba(0,0,0,.18)');
+  // legs (frame swing)
+  const ls = frame? 0:1;
+  px(ox+2, oy+10, 3, 3, c.pants);
+  px(ox+7, oy+10, 3, 3, c.pants);
+  px(ox+2, oy+12+ (dir==='up'?0:0), 3, 1, c.shoes);
+  px(ox+7, oy+12, 3, 1, c.shoes);
+  if(frame){ px(ox+2,oy+9,3,1,c.pants); } else { px(ox+7,oy+9,3,1,c.pants); }
+  // body
+  px(ox+1, oy+6, 10, 5, c.top);
+  px(ox+1, oy+6, 10, 1, 'rgba(255,255,255,.12)');
+  px(ox+1, oy+9, 10, 2, c.topSh);
+  // head
+  px(ox+2, oy, 8, 7, c.skin);
+  px(ox+2, oy, 8, 2, c.skin);
+  // hair + face by direction
+  if(dir==='down'){
+    px(ox+2, oy, 8, 2, c.hair); px(ox+1,oy,2,4,c.hair); px(ox+9,oy,2,4,c.hair);
+    px(ox+3, oy+3, 1, 2, COL.ink); px(ox+8, oy+3, 1, 2, COL.ink);
+    px(ox+5, oy+5, 2, 1, c.skin2);
+  } else if(dir==='up'){
+    px(ox+1, oy, 10, 6, c.hair);
+    px(ox+3, oy+5, 6, 1, c.hair);
+  } else if(dir==='left'){
+    px(ox+1, oy, 8, 6, c.hair); px(ox+2,oy+3,5,4,c.skin);
+    px(ox+2, oy+3, 1, 2, COL.ink);
+    px(ox+1, oy+5, 3, 1, c.skin2);
+  } else { // right
+    px(ox+3, oy, 8, 6, c.hair); px(ox+5,oy+3,5,4,c.skin);
+    px(ox+8, oy+3, 1, 2, COL.ink);
+    px(ox+8, oy+5, 3, 1, c.skin2);
+  }
+}
+
+// objective marker (bobbing arrow)
+function drawMarker(sx,sy){
+  const b = Math.round(Math.sin(perf/200)*2);
+  const y = sy - 8 + b;
+  px(sx+6, y, 4, 4, COL.coral);
+  px(sx+5, y+4, 6, 1, COL.coral);
+  px(sx+6, y+5, 4, 1, COL.coral);
+  px(sx+7, y+6, 2, 1, COL.coral);
+}
+
+let perf = 0;
+function render(){
+  ctx.clearRect(0,0,VIEW_W,VIEW_H);
+  const startY = Math.max(0, Math.floor(camY/TILE));
+  const endY = Math.min(MAP_H, startY + (VIEW_H/TILE)+2);
+  // tiles
+  for(let y=startY; y<endY; y++){
+    for(let x=0; x<MAP_W; x++){
+      const sx = x*TILE, sy = y*TILE - camY;
+      const t = grid[y][x];
+      if(t===FLOOR) drawFloorTile(sx,sy, (x+y)%2===0);
+      else if(t===RUG) drawRugTile(sx,sy);
+      else if(t===DOOR) drawDoorTile(sx,sy,x,y, doorAt[key(x,y)].locked);
+      else if(t===WALL) drawWallTile(sx,sy,x,y);
+      // VOID -> leave black
+    }
+  }
+  // decos (sorted by y for basic depth)
+  const inView = decos.filter(d=> d.ty>=startY-1 && d.ty<=endY+1);
+  inView.sort((a,b)=>a.ty-b.ty);
+  for(const d of inView){
+    drawDeco(d, d.tx*TILE, d.ty*TILE - camY);
+  }
+  // objective marker
+  if(objective && !objective.done){
+    const [ox,oy]=objective.tile;
+    drawMarker(ox*TILE, oy*TILE - camY);
+  }
+  // player
+  drawAvatar(Math.round(player.px), Math.round(player.py - camY), player.dir, player.frame, PLAYER_COLORS);
+}
+
+/* ============================================================= *
+ *  GAME LOOP
+ * ============================================================= */
+let state = 'title'; // title | playing | dialogue | profile | loading | verdict
+let last = 0;
+function loop(ts){
+  perf = ts;
+  const dt = Math.min(50, ts-last); last=ts;
+  if(state==='playing') update(dt);
+  // camera always eases toward player
+  const targetCam = clamp(player.py + TILE/2 - VIEW_H/2, 0, MAP_H*TILE - VIEW_H);
+  camY += (targetCam - camY) * 0.2;
+  if(Math.abs(targetCam-camY)<0.4) camY=targetCam;
+  render();
+  requestAnimationFrame(loop);
+}
+function clamp(v,a,b){ return v<a?a:v>b?b:v; }
+
+const MOVE_SPEED = 1/8; // tiles-per-frame-ish progress step (approx 8 frames/tile)
+function update(dt){
+  if(player.moving){
+    player.prog += (dt/1000) * 7.2; // ~7 tiles/sec
+    player.animT += dt;
+    if(player.animT>120){ player.frame^=1; player.animT=0; }
+    if(player.prog>=1){
+      player.prog=1;
+      player.tx=player.toX; player.ty=player.toY;
+      player.px=player.tx*TILE; player.py=player.ty*TILE;
+      player.moving=false; player.frame=0;
+    } else {
+      player.px = (player.fromX + (player.toX-player.fromX)*player.prog)*TILE;
+      player.py = (player.fromY + (player.toY-player.fromY)*player.prog)*TILE;
+      return;
+    }
+  }
+  // not moving: decide next
+  const held = keyState.up?'up':keyState.down?'down':keyState.left?'left':keyState.right?'right':null;
+  if(held){ player.path=[]; tryStartMove(held); return; }
+  if(player.path.length){
+    const [nx,ny]=player.path[0];
+    const dx=nx-player.tx, dy=ny-player.ty;
+    let d = dx===1?'right':dx===-1?'left':dy===1?'down':'up';
+    if(tryStartMove(d)) player.path.shift();
+    else player.path=[];
+  }
+}
+
+/* ============================================================= *
+ *  DIALOGUE ENGINE
+ * ============================================================= */
+const dEl = document.getElementById('dialogue');
+const dText = document.getElementById('dtext');
+const dSpeaker = document.getElementById('dspeaker');
+const dNext = document.getElementById('dnext');
+const choicesEl = document.getElementById('choices');
+
+let dq = [];          // queue of line objects
+let di = 0;           // index
+let typed = '';       // currently displayed
+let full = '';        // full text of current line
+let typing = false;
+let typeAcc = 0;
+let onDone = null;    // callback when queue finishes
+let awaitChoice = false;
+let awaitAction = false;
+
+function speak(lines, speaker, done){
+  dq = lines.slice(); di = 0; onDone = done || null;
+  setSpeaker(speaker);
+  state='dialogue';
+  show('#dialogue');
+  document.getElementById('touch').classList.add('hidden');
+  nextLine();
+}
+function setSpeaker(s){
+  if(s==='mentor'){ dSpeaker.textContent='MENTOR'; dSpeaker.className='speaker mentor'; }
+  else if(s==='you'){ dSpeaker.textContent='YOU'; dSpeaker.className='speaker'; }
+  else if(s==='sys'){ dSpeaker.textContent='THE BENCH'; dSpeaker.className='speaker'; }
+  else { dSpeaker.textContent=s.toUpperCase(); dSpeaker.className='speaker'; }
+}
+
+function nextLine(){
+  clearChoices();
+  dNext.classList.add('hidden');
+  if(di>=dq.length){ endDialogue(); return; }
+  const line = dq[di];
+  if(line.speaker) setSpeaker(line.speaker);
+  // action lines (open modal / generate)
+  if(line.action){
+    awaitAction=true; dText.textContent=''; 
+    if(line.action==='profile'){ openProfile(); }
+    else if(line.action==='generate'){ startGeneration(); }
+    return;
+  }
+  full = line.textFn ? line.textFn() : (line.text || '');
+  typed=''; typing=true; typeAcc=0;
+  renderTyped();
+}
+function renderTyped(){
+  dText.innerHTML = escapeHtml(typed) + (typing? '<span class="cursor show">▌</span>' : '');
+}
+function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function typeTick(dt){
+  if(!typing) return;
+  typeAcc += dt;
+  const step = 18; // ms per char
+  while(typeAcc>=step && typed.length<full.length){
+    typed += full[typed.length]; typeAcc-=step;
+  }
+  renderTyped();
+  if(typed.length>=full.length){
+    typing=false; renderTyped();
+    const line=dq[di];
+    if(line.choices){ showChoices(line); }
+    else { dNext.classList.remove('hidden'); }
+  }
+}
+
+function showChoices(line){
+  awaitChoice=true;
+  choicesEl.innerHTML='';
+  line.choices.forEach((ch,i)=>{
+    const b=document.createElement('button');
+    b.className='choice';
+    b.innerHTML=`<span class="k">${i+1}</span><span>${escapeHtml(ch.label)}</span>`;
+    b.onclick=(e)=>{ e.stopPropagation(); pickChoice(line,ch); };
+    choicesEl.appendChild(b);
+  });
+}
+function pickChoice(line,ch){
+  if(line.key) answers[line.key]=ch.value;
+  awaitChoice=false; clearChoices();
+  di++; nextLine();
+}
+function clearChoices(){ awaitChoice=false; choicesEl.innerHTML=''; }
+
+function advanceDialogue(){
+  if(awaitChoice) return;      // must pick a choice
+  if(awaitAction) return;      // modal/generation controls flow
+  if(typing){ typed=full; typing=false; renderTyped();
+    const line=dq[di];
+    if(line.choices) showChoices(line); else dNext.classList.remove('hidden');
+    return;
+  }
+  const line=dq[di];
+  if(line.choices) return;     // wait for pick
+  di++; nextLine();
+}
+
+function endDialogue(){
+  hide('#dialogue');
+  document.getElementById('touch').classList.remove('hidden');
+  state='playing';
+  const cb=onDone; onDone=null;
+  if(cb) cb();
+}
+
+// resume after an action line (profile) completes
+function resumeAfterAction(){
+  awaitAction=false; di++; nextLine();
+}
+
+/* ============================================================= *
+ *  ROOM CONTENT  (single mentor voice throughout)
+ * ============================================================= */
+const answers = {};
+
+/* ================================================================
+ *  BACKEND WIRING
+ *  Paste your n8n Webhook URL here (Production URL from the Webhook
+ *  node), e.g. https://your-n8n-host/webhook/bench
+ *  The game calls it twice: {stage:'profile'} to scrape LinkedIn,
+ *  and {stage:'verdict'} to get the mentor's ruling.
+ *  Leave it blank to run the game fully offline (skips the scrape and
+ *  uses the built-in deterministic verdict).
+ * ================================================================ */
+const WEBHOOK_URL = '';
+
+let linkedinUrl = '';
+let profileLoaded = false;
+let profile = { name:'', role:'', company:'', headline:'', years:'', about:'', skills:'' };
+
+function firstName(){ return (profile.name||'').trim().split(/\s+/)[0] || ''; }
+function nameBit(){ // company/role hint for callbacks, from the scraped profile
+  return (profile.company || profile.role || '').trim();
+}
+
+function receptionDialogue(){
+  const lines = [
+    {text:"Floor 11. It's late. You made it up here, which means you're serious enough to at least ask."},
+    {text:"I read people deciding whether to blow two years and a house deposit on a degree. That's the job."},
+    {text:"Before the room reads you — drop your LinkedIn. I'll pull your page while you walk."},
+    {action:'profile'},
+    // resumes here after the modal + scrape — evaluated at display time so it sees what came back:
+    {textFn: ()=> profileLoaded
+        ? `${firstName()? firstName()+'. ' : ''}Got it — ${profile.role||'read your page'}${profile.company? ' at '+profile.company : ''}. That's plenty to work with.`
+        : "Your page is being coy — or you skipped it. Fine. I'll read you off your answers alone, then."},
+    {text:"Walk up. First door's open. Talk to the terminal in each room — that's me. Don't overthink the answers."},
+  ];
+  speak(lines,'mentor', ()=> unlockDoor(32, receptionInter()));
+}
+function receptionInter(){ const it=interact[key(6,34)]; it.done=true; return it; }
+
+function dealDialogue(){
+  const nm = nameBit();
+  speak([
+    {text:"The Deal Room. This is where we find out what you're actually chasing."},
+    {text:"It's 11pm. Why are you looking this up right now — honestly?"},
+    {key:'why_now', choices:[
+      {label:"I feel stuck where I am", value:'stuck'},
+      {label:"Everyone around me has one", value:'everyone'},
+      {label:"There's a specific role I can't reach", value:'specific_role'},
+      {label:"I want a reset / something new", value:'reset'},
+    ]},
+    {text:"Finish it: 'I want an MBA because I'm running...'"},
+    {key:'running', choices:[
+      {label:"...toward something specific", value:'toward'},
+      {label:"...away from my current job", value:'away'},
+      {label:"...not sure — and I know that's the problem", value:'unsure'},
+    ]},
+    {text: nm ? `You've been building toward ${nm}. Noted. Keep going.` : "Noted. Keep going — the numbers are next door."},
+  ],'mentor', ()=> unlockDoor(26, markDone('deal')));
+}
+
+function numbersDialogue(){
+  const runningAway = answers.running==='away';
+  speak([
+    {text:"The Numbers Room. Nobody likes this room. That's usually the tell."},
+    {text:"Where are you in your field right now?"},
+    {key:'level', choices:[
+      {label:"Early — still junior", value:'early'},
+      {label:"Comfortable — solid mid-level", value:'mid'},
+      {label:"Strong — senior, respected", value:'senior'},
+      {label:"Top of my field", value:'top'},
+    ]},
+    {text:"After the MBA, what is the actual job? Not the vibe — the job."},
+    {key:'target', choices:[
+      {label:"Same field, more senior", value:'same_senior'},
+      {label:"A total career switch", value:'switch'},
+      {label:"Consulting / Banking / PE", value:'high_finance'},
+      {label:"...no specific job in mind", value:'none'},
+    ]},
+    {text:"Who's paying for it?"},
+    {key:'funding', choices:[
+      {label:"Loans — all me", value:'loans'},
+      {label:"Savings I've got", value:'savings'},
+      {label:"Employer / scholarship", value:'employer'},
+      {label:"Haven't thought about it", value:'unsure'},
+    ]},
+    { text: runningAway
+        ? "So you're funding an escape. That math is worse than it looks. Onward."
+        : "Fine. The network's the next question — and it's the one people lie to themselves about." },
+  ],'mentor', ()=> unlockDoor(20, markDone('numbers')));
+}
+
+function networkDialogue(){
+  speak([
+    {text:"The Network Room. Everyone says they're here for 'the network.' Let's test it."},
+    {text:"Be honest: do you want the MBA, or the people it puts you next to?"},
+    {key:'want', choices:[
+      {label:"The network, mostly", value:'network'},
+      {label:"The brand on my resume", value:'brand'},
+      {label:"The actual skills", value:'skills'},
+      {label:"All of it — I know", value:'all'},
+    ]},
+    {text:"Name one door that network opens that you can't open yourself."},
+    {key:'door', choices:[
+      {label:"An industry I can't break into", value:'industry'},
+      {label:"Investors / co-founders", value:'investors'},
+      {label:"Senior mentors & sponsors", value:'mentors'},
+      {label:"...honestly, I can't name one", value:'cant_name'},
+    ]},
+    { textFn: ()=> answers.door==='cant_name'
+        ? "You couldn't name one. Hold onto that feeling — it matters in the last room."
+        : "Okay, that's a real door. Last room: the cheaper path you're avoiding." },
+  ],'mentor', ()=> unlockDoor(14, markDone('network')));
+}
+
+function alternativesDialogue(){
+  speak([
+    {text:"The Alternatives Room. This is the one nobody wants to walk into."},
+    {text:"If a 6-week course plus a job switch got you 80% of the way, for 5% of the cost — would you still want the MBA?"},
+    {key:'alt_tradeoff', choices:[
+      {label:"Yes — I want the full thing", value:'still_full'},
+      {label:"...maybe not, actually", value:'maybe_not'},
+      {label:"No, I wouldn't", value:'no'},
+    ]},
+    {text:"Have you actually applied to the jobs you think you need an MBA to get?"},
+    {key:'applied', choices:[
+      {label:"Yes — and got rejected", value:'rejected'},
+      {label:"Yes, but half-heartedly", value:'half'},
+      {label:"No — not yet", value:'not_yet'},
+    ]},
+    {text:"That's everything I need. Come up. I'll give it to you straight."},
+  ],'mentor', ()=> unlockDoor(8, markDone('alternatives')));
+}
+
+function verdictDialogue(){
+  speak([
+    {text:"So. I've watched you walk the whole floor. I've got your answers in front of me."},
+    {text:"You want the honest read, not the comfortable one. That's why you came up here at 11pm instead of reading another listicle."},
+    {text:"Give me a second. I'm going to look at all of it at once — and call it."},
+    {action:'generate'},
+  ],'mentor', null);
+}
+
+function roomTrigger(room){
+  ({ deal:dealDialogue, numbers:numbersDialogue, network:networkDialogue,
+     alternatives:alternativesDialogue, verdict:verdictDialogue }[room])();
+}
+
+function unlockDoor(y, _it){
+  const d=doorAt[key(CX,y)]; if(d) d.locked=false;
+  // set next objective
+  setObjectiveForNextRoom();
+}
+function markDone(room){
+  for(const k in interact){ if(interact[k].room===room){ interact[k].done=true; } }
+  return true;
+}
+function setObjectiveForNextRoom(){
+  // find first not-done interactable going up the floor
+  const order = ['deal','numbers','network','alternatives','verdict'];
+  for(const r of order){
+    for(const k in interact){
+      const it=interact[k];
+      if(it.room===r && !it.done){ objective=it; return; }
+    }
+  }
+  objective=null;
+}
+
+/* ============================================================= *
+ *  INTERACTION
+ * ============================================================= */
+function handleInteract(){
+  if(player.moving) return;
+  const [fx,fy]=frontTile();
+  let it = interact[key(fx,fy)];
+  // also allow interacting with an NPC/terminal you're standing adjacent to in any dir
+  if(!it){
+    for(const d of ['up','down','left','right']){
+      const [dx,dy]=DIRS[d]; const k=key(player.tx+dx,player.ty+dy);
+      if(interact[k]){ it=interact[k]; player.dir=d; break; }
+    }
+  }
+  if(!it){
+    // flavor when facing a locked door
+    if(inBounds(fx,fy) && grid[fy][fx]===DOOR && doorAt[key(fx,fy)].locked){
+      speak([{text:"Locked. Finish what's in this room first — then it opens."}],'mentor',null);
+    }
+    return;
+  }
+  if(it.done && it.who==='mentor' && it.room==='verdict') return;
+  if(it.done) return;
+  if(it.room==='reception'){ receptionDialogue(); }
+  else { roomTrigger(it.room); }
+}
+
+/* ============================================================= *
+ *  PROFILE MODAL
+ * ============================================================= */
+function openProfile(){
+  state='profile'; show('#profile');
+  document.getElementById('touch').classList.add('hidden');
+  const inp=document.getElementById('purl');
+  document.getElementById('perr').classList.add('hidden');
+  setTimeout(()=>inp.focus(), 60);
+}
+function isLinkedIn(u){
+  if(!u) return false;
+  try{ return new URL(u).hostname.toLowerCase().replace(/^www\./,'').endsWith('linkedin.com'); }
+  catch(_){ return /linkedin\.com\/(in|pub)\//i.test(u); }
+}
+const purlEl = document.getElementById('purl');
+purlEl.addEventListener('input', ()=> document.getElementById('perr').classList.add('hidden'));
+purlEl.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('pUse').click(); } });
+
+const PULL_MSGS = ["PULLING YOUR PAGE...","READING YOUR HISTORY...","NOTING WHAT YOU LEFT OUT..."];
+let pullTimer=null, pullIdx=0;
+function startPullCycle(){
+  pullIdx=0; document.getElementById('loadmsg').textContent=PULL_MSGS[0];
+  pullTimer=setInterval(()=>{ pullIdx=(pullIdx+1)%PULL_MSGS.length;
+    document.getElementById('loadmsg').textContent=PULL_MSGS[pullIdx]; },1600);
+}
+function stopPullCycle(){ if(pullTimer){ clearInterval(pullTimer); pullTimer=null; } }
+
+const PROFILE_TIMEOUT_MS = 45000;
+async function scrapeProfile(url){
+  if(!WEBHOOK_URL) return false; // no backend wired → skip the scrape gracefully
+  try{
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(), PROFILE_TIMEOUT_MS);
+    const res=await fetch(WEBHOOK_URL,{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ stage:'profile', linkedin_url:url }),
+      signal: ctrl.signal
+    });
+    clearTimeout(timer);
+    if(!res.ok) throw new Error('http '+res.status);
+    const data=await res.json();
+    const p=data.profile || data || {};
+    profile={
+      name:p.name||'', role:p.role||'', company:p.company||'',
+      headline:p.headline||'', years:(p.years!=null?String(p.years):''),
+      about:p.about||'', skills:p.skills||''
+    };
+    profileLoaded = !!(profile.name || profile.role || profile.headline || profile.company);
+    return profileLoaded;
+  }catch(e){ profileLoaded=false; return false; }
+}
+
+document.getElementById('pUse').onclick = async ()=>{
+  const v=document.getElementById('purl').value.trim();
+  if(!isLinkedIn(v)){ document.getElementById('perr').classList.remove('hidden'); return; }
+  linkedinUrl=v;
+  hide('#profile');
+  state='loading'; show('#loading');
+  startPullCycle();
+  await scrapeProfile(v);
+  stopPullCycle();
+  hide('#loading');
+  state='dialogue';
+  resumeAfterAction();
+};
+document.getElementById('pSkip').onclick = ()=>{ linkedinUrl=''; profileLoaded=false; closeProfile(); };
+function closeProfile(){
+  hide('#profile');
+  state='dialogue';
+  resumeAfterAction();
+}
+
+/* ============================================================= *
+ *  VERDICT: Claude call + fallback + card
+ * ============================================================= */
+const LOAD_MSGS = [
+  "READING YOU...","CROSS-CHECKING YOUR ANSWERS...","IGNORING WHAT YOU WANT TO HEAR...","WRITING THE CALL..."
+];
+const ARCHETYPES = [
+  "The Fear Applicant","The Undervalued Operator","The Actually Ready One",
+  "The Brand Chaser","The Long-Way-Rounder","The Pivot Case"
+];
+
+function startGeneration(){
+  awaitAction=true;
+  hide('#dialogue');
+  document.getElementById('touch').classList.add('hidden');
+  state='loading'; show('#loading');
+  cycleLoad();
+  callMentor().then(v=>{
+    renderCard(v).then(()=>{
+      hide('#loading'); state='verdict'; show('#verdict');
+      lastVerdict=v;
+    });
+  });
+}
+let loadTimer=null, loadIdx=0;
+function cycleLoad(){
+  loadIdx=0; document.getElementById('loadmsg').textContent=LOAD_MSGS[0];
+  loadTimer=setInterval(()=>{
+    loadIdx=(loadIdx+1)%LOAD_MSGS.length;
+    document.getElementById('loadmsg').textContent=LOAD_MSGS[loadIdx];
+  },1400);
+}
+
+let lastVerdict=null;
+
+async function callMentor(){
+  if(WEBHOOK_URL){
+    try{
+      const res = await fetch(WEBHOOK_URL,{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ stage:'verdict', linkedin_url:linkedinUrl, profile, answers })
+      });
+      if(!res.ok) throw new Error("http "+res.status);
+      const data = await res.json();
+      const obj = data.verdict || data;               // accept {verdict:{...}} or a flat object
+      if(!obj || !obj.headline || !obj.archetype) throw new Error("bad shape");
+      if(!Array.isArray(obj.data_points)) obj.data_points=[];
+      obj.data_points = obj.data_points.slice(0,3);
+      if(!ARCHETYPES.includes(obj.archetype)) obj.archetype = closestArchetype(obj.archetype);
+      return obj;
+    } catch(e){
+      /* fall through to the local deterministic read */
+    } finally {
+      if(loadTimer){ clearInterval(loadTimer); loadTimer=null; }
+    }
+  }
+  if(loadTimer){ clearInterval(loadTimer); loadTimer=null; }
+  return fallbackVerdict();
+}
+function closestArchetype(a){
+  a=(a||'').toLowerCase();
+  return ARCHETYPES.find(x=>a.includes(x.toLowerCase().replace('the ','')))||ARCHETYPES[1];
+}
+
+// deterministic read so the loop works even with no API (e.g. opened offline)
+function fallbackVerdict(){
+  const a=answers, nm=nameBit();
+  let arche, call, head, detail;
+  const damning=[];
+  if(a.funding==='loans') damning.push("You'd fund all of it on debt.");
+  if(a.funding==='unsure') damning.push("You haven't thought about who pays.");
+  if(a.door==='cant_name') damning.push("You couldn't name one door it opens.");
+  if(a.applied==='not_yet') damning.push("You haven't applied to the jobs yet.");
+  if(a.alt_tradeoff==='maybe_not'||a.alt_tradeoff==='no') damning.push("A cheaper path gets you most of the way.");
+  if(a.want==='brand') damning.push("You want the logo, not the learning.");
+  if(a.running==='away') damning.push("You're running from the job, not toward a plan.");
+  if(a.why_now==='everyone') damning.push("You're doing it because your feed is.");
+
+  if(a.running==='away' || a.why_now==='reset' || (a.why_now==='stuck'&&a.door==='cant_name')){
+    arche="The Fear Applicant"; call="Not an MBA problem.";
+    head="You don't need an MBA — you need a reason.";
+    detail=`You're ${nm?`still at ${nm} and `:''}running from something, not toward it. An MBA won't fix a motivation you can't name. Sit with the fear before you spend two years outrunning it.`;
+  } else if(a.want==='brand' || (a.want==='network'&&a.door==='cant_name')){
+    arche="The Brand Chaser"; call="Skip it — for now.";
+    head="You want the logo more than the learning.";
+    detail="You're buying a brand to feel legitimate. That's expensive therapy. Go earn the thing the logo signals, then reconsider from strength.";
+  } else if((a.target==='switch'||a.target==='high_finance') && a.running==='toward'){
+    arche="The Pivot Case";
+    if(a.funding==='loans'){ call="Worth it — T15 only, if funded."; head="Worth it, but only a top program and only on someone else's dime."; }
+    else { call="Worth it."; head="The switch is real — this is the bridge."; }
+    detail="You're making a genuine pivot and the network is the actual mechanism, not a nice-to-have. Just don't pay sticker price on loans to do it — the brand tier matters here more than anywhere.";
+  } else if(a.alt_tradeoff==='maybe_not' || a.alt_tradeoff==='no'){
+    arche="The Long-Way-Rounder"; call="Skip it.";
+    head="You already admitted the cheaper path works.";
+    detail="You flinched when I offered you 80% for 5%. That flinch is your answer. Take the shorter road and keep the house deposit.";
+  } else if(a.applied==='not_yet' && (a.target==='same_senior'||a.target==='none')){
+    arche="The Undervalued Operator"; call="You have a resume problem.";
+    head="Not an MBA problem — a resume problem.";
+    detail=`You're good at the job${nm?` at ${nm}`:''} and underpriced, not under-credentialed. Apply to the roles you think you need the degree for. Get rejected first. Then we'll talk.`;
+  } else if(a.running==='toward' && a.door!=='cant_name' && a.funding!=='unsure'){
+    arche="The Actually Ready One"; call="Worth it.";
+    head="You're the rare one who actually should. Go.";
+    detail="You know the job, you can name the door, and you've thought about the money. That's most people's whole problem, solved. Stop asking the internet and start the application.";
+  } else {
+    arche="The Undervalued Operator"; call="Skip it — for now.";
+    head="You're underpriced, not under-credentialed.";
+    detail="Nothing in your answers says the degree unlocks something you can't reach cheaper. Push on your current track for a year first — the case will be obvious if it's real.";
+  }
+  while(damning.length<3) damning.push("");
+  return { archetype:arche, headline:head, final_call:call, data_points:damning.filter(Boolean).slice(0,3), detail };
+}
+
+/* ---------- card rendering (poster, exports to PNG) ---------- */
+const cardCv = document.getElementById('cardCanvas');
+const cctx = cardCv.getContext('2d');
+
+function wrap(ctx, text, maxW){
+  const words=text.split(' '); const lines=[]; let cur='';
+  for(const w of words){
+    const t=cur?cur+' '+w:w;
+    if(ctx.measureText(t).width>maxW && cur){ lines.push(cur); cur=w; }
+    else cur=t;
+  }
+  if(cur) lines.push(cur);
+  return lines;
+}
+
+async function renderCard(v){
+  // wait for fonts (fallback after 1.2s if they don't load)
+  await Promise.race([
+    (document.fonts?document.fonts.ready:Promise.resolve()),
+    new Promise(r=>setTimeout(r,1200))
+  ]);
+  const W=1080,H=1350, m=64;
+  const paper='#F1E9D8', ink='#171512', coral='#EE4B36';
+  // frame
+  cctx.fillStyle=ink; cctx.fillRect(0,0,W,H);
+  cctx.fillStyle=paper; cctx.fillRect(m/2, m/2, W-m, H-m);
+  // inner content margins
+  const x=m+18, right=W-m-18, w=right-x;
+  let y=m+34;
+
+  // top label row
+  cctx.fillStyle=ink; cctx.font='700 26px "Space Grotesk", sans-serif';
+  cctx.textBaseline='alphabetic';
+  cctx.fillText('THE BENCH', x, y+8);
+  cctx.fillStyle=coral;
+  const rt='MBA VERDICT';
+  cctx.textAlign='right'; cctx.fillText(rt, right, y+8); cctx.textAlign='left';
+  // hairline
+  y+=30; cctx.fillStyle=ink; cctx.fillRect(x,y,w,3); y+=52;
+
+  // archetype eyebrow + badge
+  cctx.fillStyle='#8a8172'; cctx.font='700 22px "Space Grotesk", sans-serif';
+  cctx.fillText('YOUR ARCHETYPE', x, y); y+=16;
+  const badge=(v.archetype||'').toUpperCase();
+  cctx.font='900 40px "Archivo Black","Space Grotesk",sans-serif';
+  const bw=cctx.measureText(badge).width;
+  cctx.fillStyle=coral; roundRect(cctx, x, y, Math.min(bw+44, w), 66, 12); cctx.fill();
+  cctx.fillStyle='#fff'; cctx.fillText(badge, x+22, y+47);
+  y+=66+56;
+
+  // headline (hero)
+  cctx.fillStyle=ink; cctx.font='900 66px "Archivo Black","Space Grotesk",sans-serif';
+  const hl=wrap(cctx, '“'+(v.headline||'')+'”', w);
+  for(const ln of hl){ cctx.fillText(ln, x, y); y+=74; }
+  y+=6;
+
+  // final call chip
+  const call=(v.final_call||'').toUpperCase();
+  cctx.font='800 30px "Space Grotesk",sans-serif';
+  const cw=cctx.measureText(call).width;
+  cctx.fillStyle=ink; roundRect(cctx, x, y, cw+40, 56, 10); cctx.fill();
+  cctx.fillStyle=paper; cctx.fillText(call, x+20, y+38);
+  y+=56+54;
+
+  // divider
+  cctx.fillStyle=ink; cctx.fillRect(x,y,w,2); y+=44;
+
+  // THE READ
+  cctx.fillStyle='#8a8172'; cctx.font='700 22px "Space Grotesk",sans-serif';
+  cctx.fillText('THE READ', x, y); y+=34;
+  cctx.font='600 30px "Space Grotesk",sans-serif';
+  const pts=(v.data_points&&v.data_points.length)? v.data_points : ['—'];
+  for(const p of pts){
+    cctx.fillStyle=coral; cctx.fillRect(x, y-22, 16, 16);
+    cctx.fillStyle=ink;
+    const wl=wrap(cctx, p, w-40);
+    let yy=y;
+    wl.forEach((ln,i)=>{ cctx.fillText(ln, x+34, yy); yy+= (i<wl.length-1?38:0); });
+    y=yy+46;
+  }
+
+  // bottom coral band CTA
+  const bandH=118, by=H-m/2-bandH-10;
+  cctx.fillStyle=coral; cctx.fillRect(m/2, by, W-m, bandH);
+  cctx.fillStyle='#fff';
+  cctx.font='900 40px "Archivo Black","Space Grotesk",sans-serif';
+  cctx.fillText('Get your own read →', x, by+56);
+  cctx.font='700 30px "Space Grotesk",sans-serif';
+  cctx.fillText('thebench.mba', x, by+96);
+}
+function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+
+/* ---------- share / download ---------- */
+document.getElementById('dlBtn').onclick = ()=>{
+  const a=document.createElement('a');
+  a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict-the-bench.png'; a.click();
+  toast('Saved to your device');
+};
+document.getElementById('shareBtn').onclick = async ()=>{
+  try{
+    const blob = await new Promise(r=> cardCv.toBlob(r,'image/png'));
+    const file = new File([blob],'mba-verdict.png',{type:'image/png'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:'My MBA verdict', text:lastVerdict?('“'+lastVerdict.headline+'” — my read from The Bench'):''});
+    } else {
+      const a=document.createElement('a'); a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict.png'; a.click();
+      toast('Saved — share it anywhere');
+    }
+  }catch(e){ toast('Share canceled'); }
+};
+document.getElementById('copyBtn').onclick = async ()=>{
+  const line = lastVerdict? ('“'+lastVerdict.headline+'” — '+lastVerdict.final_call+' (my MBA read from The Bench)') : '';
+  try{ await navigator.clipboard.writeText(line); toast('Line copied'); }
+  catch(e){ toast('Copy not available'); }
+};
+document.getElementById('againBtn').onclick = ()=> location.reload();
+
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+/* ============================================================= *
+ *  INPUT WIRING
+ * ============================================================= */
+function show(sel){ document.querySelector(sel).classList.remove('hidden'); }
+function hide(sel){ const el=document.querySelector(sel); if(el) el.classList.add('hidden'); }
+
+// keyboard
+const KMAP={ ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',
+  w:'up',s:'down',a:'left',d:'right',W:'up',S:'down',A:'left',D:'right' };
+addEventListener('keydown', e=>{
+  // choices via number keys
+  if(state==='dialogue' && awaitChoice && /^[1-9]$/.test(e.key)){
+    const line=dq[di]; const i=parseInt(e.key)-1;
+    if(line.choices && line.choices[i]){ pickChoice(line,line.choices[i]); e.preventDefault(); }
+    return;
+  }
+  if(e.key===' '||e.key==='Enter'){
+    e.preventDefault();
+    if(state==='playing') handleInteract();
+    else if(state==='dialogue') advanceDialogue();
+    else if(state==='title') startGame();
+    return;
+  }
+  const d=KMAP[e.key];
+  if(d){ keyState[d]=true; e.preventDefault(); }
+});
+addEventListener('keyup', e=>{ const d=KMAP[e.key]; if(d) keyState[d]=false; });
+
+// touch dpad
+document.querySelectorAll('.dbtn').forEach(btn=>{
+  const dir=btn.dataset.dir;
+  const on=e=>{ e.preventDefault(); keyState[dir]=true; };
+  const off=e=>{ e.preventDefault(); keyState[dir]=false; };
+  btn.addEventListener('pointerdown',on);
+  btn.addEventListener('pointerup',off);
+  btn.addEventListener('pointerleave',off);
+  btn.addEventListener('pointercancel',off);
+});
+const abtn=document.getElementById('abtn');
+abtn.addEventListener('pointerdown', e=>{
+  e.preventDefault();
+  if(state==='playing') handleInteract();
+  else if(state==='dialogue') advanceDialogue();
+});
+
+// tap on canvas: advance dialogue, or move / interact
+cv.addEventListener('pointerdown', e=>{
+  if(state==='dialogue'){ advanceDialogue(); return; }
+  if(state!=='playing') return;
+  const rect=cv.getBoundingClientRect();
+  const scaleX=VIEW_W/rect.width, scaleY=VIEW_H/rect.height;
+  const ix=(e.clientX-rect.left)*scaleX;
+  const iy=(e.clientY-rect.top)*scaleY + camY;
+  const tx=Math.floor(ix/TILE), ty=Math.floor(iy/TILE);
+  // interactable adjacent to player?
+  const adj = Math.abs(tx-player.tx)+Math.abs(ty-player.ty);
+  if(interact[key(tx,ty)] && adj===1){
+    const dx=tx-player.tx, dy=ty-player.ty;
+    player.dir = dx===1?'right':dx===-1?'left':dy===1?'down':'up';
+    handleInteract(); return;
+  }
+  // else pathfind
+  const path=findPath(player.tx,player.ty,tx,ty);
+  if(path) player.path=path;
+});
+
+// prevent scroll/zoom gestures stealing input
+['touchmove','gesturestart'].forEach(ev=>document.addEventListener(ev, e=>{ if(e.cancelable) e.preventDefault(); }, {passive:false}));
+
+document.getElementById('startBtn').onclick = startGame;
+function startGame(){
+  hide('#title');
+  document.getElementById('touch').classList.remove('hidden');
+  state='playing';
+  toast('Walk up to the mentor · press A / space to talk');
+}
+
+/* ============================================================= *
+ *  TYPEWRITER TICK (piggyback on rAF via loop) + boot
+ * ============================================================= */
+let _lastTypeTs=0;
+function typeLoop(ts){
+  const dt=ts-_lastTypeTs; _lastTypeTs=ts;
+  if(state==='dialogue') typeTick(dt);
+  requestAnimationFrame(typeLoop);
+}
+requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; requestAnimationFrame(loop); requestAnimationFrame(typeLoop); });
+</script>
