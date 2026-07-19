@@ -1,5 +1,5 @@
 <!--
-  THE BENCH — "Is an MBA Worth It?"
+  THE GREEN ROOM — "Is an MBA Worth It?"
   A top-down, Pokémon-style walk through a coworking floor. One mentor voice the
   whole way. At the end, a real Claude call reads your inputs and hands you a
   screenshot-able verdict card. Falls back to a deterministic read if the API
@@ -12,28 +12,32 @@
 -->
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>The Bench — Is an MBA Worth It?</title>
+<title>The Green Room — Is an MBA Worth It?</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Archivo+Black&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
 <style>
   :root{
-    --paper:#F1E9D8;
-    --ink:#171512;
-    --coral:#EE4B36;
-    --coral-dark:#C63723;
+    /* ---- Mesa brand palette ---- (--coral kept as the var name for the primary accent) */
+    --paper:#EEF2DC;       /* pale green-cream surface */
+    --ink:#151A0F;         /* near-black olive */
+    --coral:#D9E38A;       /* Mesa lime — primary accent */
+    --coral-dark:#7C9038;  /* deep lime — 3D button depth */
+    --mint:#6ED190;        /* Mesa mint — secondary accent */
+    --mint-dark:#3E9E63;   /* deep mint */
+    --accent-ink:#37471F;  /* dark green — readable text on light */
     --amber:#F0A63F;
-    --plant:#3E8E5A;
-    --wood:#9C6B3F;
-    --glass:#7C93A3;
-    --line:#2A2620;
+    --plant:#6ED190;
+    --wood:#A97C4E;
+    --glass:#7FA592;
+    --line:#20261A;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{
     background:
-      radial-gradient(120% 90% at 50% -10%, #2b2620 0%, #14110d 60%, #0d0b08 100%);
+      radial-gradient(120% 90% at 50% -10%, #1c2417 0%, #10140c 55%, #0a0d07 100%);
     color:var(--paper);
     font-family:"Space Grotesk", system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing:antialiased;
@@ -42,27 +46,21 @@
     touch-action:none;
   }
   .frame{
-    position:relative;
-    /* fixed design box (ratio 240:176); JS scales it to fill the viewport */
-    width:480px; height:352px;
-    flex:none;
-    transform: scale(var(--fit, 1));
-    transform-origin:center center;
+    position:fixed; inset:0;
+    width:100vw; height:100vh;
   }
 
   /* ---- the game viewport ---- */
   #stage{
-    position:relative;
-    width:100%;
-    aspect-ratio: 240 / 176;
-    background:#0d0b08;
-    border-radius:14px;
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    background:#0a0d07;
     overflow:hidden;
-    box-shadow:0 0 0 3px var(--ink), 0 24px 60px rgba(0,0,0,.55), 0 2px 0 rgba(255,255,255,.04) inset;
   }
   #game{
     position:absolute; inset:0;
     width:100%; height:100%;
+    object-fit:contain;
     image-rendering:pixelated;
     image-rendering:crisp-edges;
     display:block;
@@ -85,12 +83,12 @@
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     text-align:center; padding:22px;
     background:
-      linear-gradient(180deg, rgba(20,17,13,.72), rgba(20,17,13,.86)),
-      repeating-linear-gradient(45deg, rgba(238,75,54,.10) 0 14px, transparent 14px 28px);
+      linear-gradient(180deg, rgba(14,18,10,.72), rgba(14,18,10,.88)),
+      repeating-linear-gradient(45deg, rgba(110,209,144,.08) 0 14px, transparent 14px 28px);
     backdrop-filter: blur(1px);
   }
   #title .kicker{
-    font-family:"Press Start 2P"; font-size:8px; letter-spacing:2px;
+    font-family:"Press Start 2P"; font-size:clamp(8px,1.2vw,15px); letter-spacing:2px;
     color:var(--coral); margin-bottom:14px; text-transform:uppercase;
   }
   #title h1{
@@ -100,14 +98,14 @@
   }
   #title h1 em{ color:var(--coral); font-style:normal; }
   #title .sub{
-    margin:14px 0 22px; max-width:34ch; font-size:13px; line-height:1.5;
-    color:rgba(241,233,216,.78);
+    margin:14px 0 22px; max-width:46ch; font-size:clamp(13px,1.35vw,19px); line-height:1.5;
+    color:rgba(238,242,220,.8);
   }
   .btn{
-    font-family:"Press Start 2P"; font-size:10px; letter-spacing:1px;
-    background:var(--coral); color:#fff; border:none; cursor:pointer;
-    padding:14px 20px; border-radius:10px;
-    box-shadow:0 4px 0 var(--coral-dark), 0 8px 18px rgba(238,75,54,.35);
+    font-family:"Press Start 2P"; font-size:clamp(10px,1.25vw,16px); letter-spacing:1px;
+    background:var(--coral); color:var(--ink); border:none; cursor:pointer;
+    padding:clamp(14px,1.5vh,20px) clamp(20px,2vw,34px); border-radius:10px;
+    box-shadow:0 4px 0 var(--coral-dark), 0 8px 18px rgba(217,227,138,.35);
     transition:transform .06s ease, box-shadow .06s ease;
     text-transform:uppercase;
   }
@@ -117,13 +115,14 @@
     box-shadow:inset 0 0 0 2px rgba(241,233,216,.5);
   }
   .btn.ghost:active{ transform:translateY(2px); box-shadow:inset 0 0 0 2px rgba(241,233,216,.5); }
-  #title .controls{ margin-top:16px; font-size:11px; color:rgba(241,233,216,.5); }
-  #title .controls b{ color:rgba(241,233,216,.8); font-weight:600; }
+  #title .controls{ margin-top:16px; font-size:clamp(11px,1.1vw,15px); color:rgba(238,242,220,.5); }
+  #title .controls b{ color:rgba(238,242,220,.8); font-weight:600; }
 
   /* Dialogue box (Pokémon-style) */
-  #dialogue{ display:flex; flex-direction:column; justify-content:flex-end; padding:10px; pointer-events:none; }
+  #dialogue{ display:flex; flex-direction:column; justify-content:flex-end; align-items:center; padding:10px 10px 16px; pointer-events:none; }
   .box{
     pointer-events:auto;
+    width:100%; max-width:860px; margin:0 auto;
     background:var(--paper); color:var(--ink);
     border-radius:10px; border:3px solid var(--ink);
     box-shadow:0 6px 0 rgba(0,0,0,.35), 0 0 0 3px rgba(241,233,216,.15) inset;
@@ -136,9 +135,9 @@
     background:var(--ink); color:var(--paper);
     padding:5px 8px; border-radius:6px; text-transform:uppercase;
   }
-  .speaker.mentor{ background:var(--coral); }
+  .speaker.mentor{ background:var(--mint); color:var(--ink); }
   #dtext{
-    min-height:44px; font-size:14px; line-height:1.42; font-weight:500;
+    min-height:44px; font-size:clamp(14px,1.35vw,19px); line-height:1.42; font-weight:500;
     white-space:pre-wrap;
   }
   .cursor{ display:inline-block; width:9px; }
@@ -155,7 +154,7 @@
     pointer-events:auto; text-align:left; cursor:pointer;
     background:#fff; color:var(--ink);
     border:2px solid var(--ink); border-radius:8px;
-    padding:9px 11px; font-size:13px; font-weight:600; font-family:inherit;
+    padding:9px 11px; font-size:clamp(13px,1.15vw,17px); font-weight:600; font-family:inherit;
     display:flex; gap:9px; align-items:flex-start;
     box-shadow:0 3px 0 rgba(0,0,0,.2);
     transition:transform .05s ease, background .12s ease;
@@ -163,7 +162,7 @@
   .choice:hover{ background:var(--paper); }
   .choice:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.2); }
   .choice .k{
-    font-family:"Press Start 2P"; font-size:8px; color:#fff; background:var(--coral);
+    font-family:"Press Start 2P"; font-size:8px; color:var(--ink); background:var(--coral);
     border-radius:4px; padding:4px 5px; margin-top:1px; flex:none;
   }
 
@@ -182,8 +181,8 @@
     border:2px solid var(--ink); border-radius:9px; padding:12px 10px;
     font-family:inherit; font-size:13px; background:#fff; color:var(--ink);
   }
-  #purl:focus{ outline:none; border-color:var(--coral); }
-  .perr{ color:var(--coral); font-size:11px; font-weight:700; margin-top:7px; }
+  #purl:focus{ outline:none; border-color:var(--mint); }
+  .perr{ color:var(--accent-ink); font-size:11px; font-weight:700; margin-top:7px; }
   .hint{ font-size:10.5px; color:#6a655b; margin-top:8px; line-height:1.4; }
   .row{ display:flex; gap:9px; margin-top:11px; }
   .row .btn{ flex:1; text-align:center; }
@@ -232,14 +231,14 @@
     border-radius:8px; color:var(--paper); display:flex; align-items:center; justify-content:center;
     -webkit-user-select:none; user-select:none; touch-action:none;
   }
-  .dbtn:active{ background:var(--coral); }
+  .dbtn:active{ background:var(--coral); color:var(--ink); }
   .dbtn.up{ left:37px; top:0 } .dbtn.down{ left:37px; top:74px }
   .dbtn.left{ left:0; top:37px } .dbtn.right{ left:74px; top:37px }
   .dbtn svg{ width:16px;height:16px; fill:currentColor }
   #abtn{
     position:absolute; right:14px; bottom:26px; width:64px; height:64px; pointer-events:auto;
-    border-radius:50%; background:var(--coral); border:3px solid #fff2;
-    color:#fff; font-family:"Press Start 2P"; font-size:14px;
+    border-radius:50%; background:var(--coral); border:3px solid rgba(21,26,15,.25);
+    color:var(--ink); font-family:"Press Start 2P"; font-size:14px;
     display:flex; align-items:center; justify-content:center;
     box-shadow:0 5px 0 var(--coral-dark); touch-action:none; -webkit-user-select:none; user-select:none;
   }
@@ -248,10 +247,10 @@
   @media (pointer:fine){ #touch{ display:none; } }
 
   .credit{
-    position:absolute; left:0; right:0; bottom:-26px; text-align:center;
-    font-size:11px; color:rgba(241,233,216,.35);
+    position:absolute; left:0; right:0; bottom:8px; text-align:center;
+    font-size:11px; color:rgba(238,242,220,.32);
   }
-  .credit b{ color:rgba(241,233,216,.55); font-weight:600; }
+  .credit b{ color:rgba(238,242,220,.5); font-weight:600; }
 </style>
 
 <div class="frame">
@@ -271,7 +270,7 @@
 
     <!-- title -->
     <div id="title" class="layer">
-      <div class="kicker">The Bench · floor 11 · 11:00 PM</div>
+      <div class="kicker">The Green Room · After Hours · <span id="clockTag">11:00 PM</span></div>
       <h1>Is an MBA<br><em>Worth It?</em></h1>
       <div class="sub">You've read every article. Walk the floor instead. Someone up here will look at your actual situation and just tell you.</div>
       <button class="btn" id="startBtn">Enter the floor</button>
@@ -312,7 +311,7 @@
 
     <!-- verdict -->
     <div id="verdict" class="layer hidden">
-      <div class="vhead">Your read · The Bench</div>
+      <div class="vhead">Your read · The Green Room</div>
       <div id="cardWrap"><canvas id="cardCanvas" width="1080" height="1350"></canvas></div>
       <div id="vactions">
         <button class="btn mini" id="dlBtn">Download</button>
@@ -334,23 +333,40 @@
  *  CONSTANTS + WORLD
  * ============================================================= */
 const TILE = 16;
-const VIEW_W = 240, VIEW_H = 176;            // internal canvas = 15 x 11 tiles
+let VIEW_W = 240;                            // canvas width — recomputed to fill the viewport
+const VIEW_H = 176;                          // 11 tiles tall (fixed zoom)
+let XOFF = 0;                                // px offset that centers the 15-tile map in a wider view
 const cv = document.getElementById('game');
 const ctx = cv.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
 const COL = {
-  paper:'#F1E9D8', paperDark:'#E4D8BF', ink:'#171512',
-  wall:'#2A241D', wallTop:'#453A2D', wallEdge:'#5A4B3A',
-  floor:'#D9C9A6', floorLine:'#CCB98F', floorAlt:'#DFD1B0',
-  coral:'#EE4B36', amber:'#F0A63F', plant:'#3E8E5A', plantDark:'#2E6E44',
-  wood:'#9C6B3F', woodDark:'#7A5230', glass:'#7C93A3', glassLite:'#A9BEC9',
-  rug:'#C97B5B', rugEdge:'#A85E42', shadow:'rgba(0,0,0,.16)',
+  paper:'#EEF2DC', paperDark:'#DDE3C4', ink:'#151A0F',
+  wall:'#242C1B', wallTop:'#3B472B', wallEdge:'#556237',
+  floor:'#E3E6CB', floorLine:'#D2D7B2', floorAlt:'#EAEDD3',
+  coral:'#D9E38A', coralDark:'#7C9038', amber:'#F0A63F',
+  mint:'#6ED190', mintDark:'#3E9E63', plant:'#6ED190', plantDark:'#3E9E63',
+  wood:'#A97C4E', woodDark:'#825C36', glass:'#7FA592', glassLite:'#A6C8B2',
+  rug:'#C3CE7A', rugEdge:'#A2AE56', shadow:'rgba(0,0,0,.16)',
   skin:'#E3B08A', skin2:'#C88F6A', hair:'#2E241C',
-  screen:'#39424A', screenOn:'#8FD0C4', metal:'#8B8377'
+  screen:'#1B2417', screenOn:'#D9E38A', metal:'#86887A'
 };
 
 const VOID=0, FLOOR=1, WALL=2, DOOR=3, RUG=4;
+
+/* ---- real local time drives the clock, the window sky, and the mentor's copy ---- */
+const _NOW = new Date();
+const _HR = _NOW.getHours();
+const TOD = (_HR>=5&&_HR<11) ? 'morning'
+          : (_HR>=11&&_HR<17) ? 'afternoon'
+          : (_HR>=17&&_HR<21) ? 'evening'
+          : 'night';                                  // 21:00–04:59
+function clockStr(d){ let h=d.getHours(), mm=d.getMinutes(); const ap=h<12?'AM':'PM'; h=h%12||12; return h+':'+String(mm).padStart(2,'0')+' '+ap; }
+const CLOCK = clockStr(_NOW);                          // e.g. "2:47 PM"
+// short mood phrase for the reception opener
+function whenBit(){ return {morning:"Early start", afternoon:"Middle of the day", evening:"End of the day", night:"It's late"}[TOD]; }
+// how the mentor refers to the moment mid-conversation
+function whenClause(){ return TOD==='night' ? "at "+CLOCK+", instead of sleeping," : "at "+CLOCK+","; }
 
 // Map: 15 wide, 40 tall. Rooms stacked; player climbs bottom -> top.
 const MAP_W = 15, MAP_H = 40;
@@ -579,20 +595,33 @@ function drawDeco(d,sx,sy){
       px(sx+4,sy+8,TILE-8,4,'rgba(0,0,0,.1)');
       break;
     case 'window': {
-      // 11pm night view: dark sky, a couple of stars, a distant lit skyline
       px(sx+1,sy+2,TILE-2,12,COL.woodDark);            // frame
-      px(sx+2,sy+3,TILE-4,10,'#161d30');               // night sky
-      px(sx+2,sy+3,TILE-4,3,'#26314a');                // faint horizon glow up top
-      const b = (d.tx*7 + d.ty*3);
-      px(sx+3+(b%8), sy+4+((b>>1)%3), 1,1,'rgba(241,233,216,.85)');   // star
-      px(sx+4+((b*3)%7), sy+5+((b>>2)%3), 1,1,'rgba(241,233,216,.55)'); // star
-      px(sx+2,sy+9,TILE-4,4,'#0e1422');                // distant skyline band
-      for(let i=0;i<5;i++){                            // warm windows in the skyline
-        if(((b+i*5)%3)!==0) px(sx+3+i*2, sy+10+((b+i)%2), 1,1, i%2?'#F2C14E':'#EE9B3F');
+      const gx=sx+2, gy=sy+3, gw=TILE-4, b=(d.tx*7 + d.ty*3);
+      if(TOD==='night'){
+        px(gx,gy,gw,10,'#161d30'); px(gx,gy,gw,3,'#26314a');        // dark sky
+        px(sx+3+(b%8), sy+4+((b>>1)%3),1,1,'rgba(241,233,216,.85)');
+        px(sx+4+((b*3)%7), sy+5+((b>>2)%3),1,1,'rgba(241,233,216,.55)');
+        px(gx,sy+9,gw,4,'#0e1422');                                 // skyline
+        for(let i=0;i<5;i++){ if(((b+i*5)%3)!==0) px(sx+3+i*2, sy+10+((b+i)%2),1,1, i%2?'#F2C14E':'#EE9B3F'); }
+      } else if(TOD==='evening'){
+        px(gx,gy,gw,10,'#6E5487'); px(gx,gy+5,gw,5,'#E68A55');      // dusk → orange horizon
+        px(gx,gy+3,gw,2,'#C56E6E');
+        px(sx+11,sy+4,1,1,'rgba(255,255,255,.5)');                  // faint star
+        px(gx,sy+9,gw,4,'#3A2A3A');
+        for(let i=0;i<5;i++){ if(((b+i*3)%2)===0) px(sx+3+i*2, sy+10,1,1,'#F2C14E'); }
+      } else if(TOD==='morning'){
+        px(gx,gy,gw,10,'#BFE0EA'); px(gx,gy+5,gw,5,'#EAD9B8');      // soft dawn
+        px(sx+4,sy+5,3,3,'#F6E27A');                                // low sun
+        px(gx,sy+9,gw,4,'#93A2A6');                                 // pale skyline
+      } else {                                                      // afternoon
+        px(gx,gy,gw,10,'#9FD0EC'); px(gx,gy,gw,3,'#B8DEF2');        // bright blue
+        px(sx+4+(b%5),sy+4,3,2,'rgba(255,255,255,.9)');            // clouds
+        px(sx+6+(b%3),sy+6,4,2,'rgba(255,255,255,.75)');
+        px(gx,sy+9,gw,4,'#9AA6A0');
       }
-      px(sx+TILE/2-1,sy+3,1,10,COL.woodDark);          // vertical muntin
-      px(sx+2,sy+7,TILE-4,1,COL.woodDark);             // horizontal muntin
-      px(sx+1,sy+2,TILE-2,1,COL.wood);                 // top frame highlight
+      px(sx+TILE/2-1,sy+3,1,10,COL.woodDark);          // muntins
+      px(sx+2,sy+7,TILE-4,1,COL.woodDark);
+      px(sx+1,sy+2,TILE-2,1,COL.wood);                 // top highlight
       break;
     }
     case 'mat':
@@ -616,7 +645,7 @@ function drawDeco(d,sx,sy){
   }
 }
 
-const PLAYER_COLORS = { skin:COL.skin, skin2:COL.skin2, hair:COL.hair, top:COL.coral, topSh:COL.coralDark||'#C63723', pants:'#3A3630', shoes:'#211E19' };
+const PLAYER_COLORS = { skin:COL.skin, skin2:COL.skin2, hair:COL.hair, top:COL.mint, topSh:COL.mintDark, pants:'#3A3630', shoes:'#211E19' };
 const MENTOR_COLORS = { skin:'#D6A07A', skin2:'#BC8560', hair:'#B9B2A6', top:'#2C2A28', topSh:'#1B1A18', pants:'#3C3A36', shoes:'#171512' };
 
 // little top-down person, 4 directions, 2 frames
@@ -672,31 +701,37 @@ function render(){
   ctx.clearRect(0,0,VIEW_W,VIEW_H);
   const startY = Math.max(0, Math.floor(camY/TILE));
   const endY = Math.min(MAP_H, startY + (VIEW_H/TILE)+2);
-  // tiles
+  const cols = Math.ceil(VIEW_W/TILE)+1;
+  // base floor across the ENTIRE width — the open coworking floor around the rooms
+  for(let y=startY; y<endY; y++){
+    const sy = y*TILE - camY;
+    for(let i=0;i<cols;i++){ drawFloorTile(i*TILE, sy, (i+y)%2===0); }
+  }
+  // the room map, centered by XOFF
   for(let y=startY; y<endY; y++){
     for(let x=0; x<MAP_W; x++){
-      const sx = x*TILE, sy = y*TILE - camY;
+      const sx = x*TILE + XOFF, sy = y*TILE - camY;
       const t = grid[y][x];
       if(t===FLOOR) drawFloorTile(sx,sy, (x+y)%2===0);
       else if(t===RUG) drawRugTile(sx,sy);
       else if(t===DOOR) drawDoorTile(sx,sy,x,y, doorAt[key(x,y)].locked);
       else if(t===WALL) drawWallTile(sx,sy,x,y);
-      // VOID -> leave black
+      // VOID -> the base floor underneath shows through
     }
   }
   // decos (sorted by y for basic depth)
   const inView = decos.filter(d=> d.ty>=startY-1 && d.ty<=endY+1);
   inView.sort((a,b)=>a.ty-b.ty);
   for(const d of inView){
-    drawDeco(d, d.tx*TILE, d.ty*TILE - camY);
+    drawDeco(d, d.tx*TILE + XOFF, d.ty*TILE - camY);
   }
   // objective marker
   if(objective && !objective.done){
     const [ox,oy]=objective.tile;
-    drawMarker(ox*TILE, oy*TILE - camY);
+    drawMarker(ox*TILE + XOFF, oy*TILE - camY);
   }
   // player
-  drawAvatar(Math.round(player.px), Math.round(player.py - camY), player.dir, player.frame, PLAYER_COLORS);
+  drawAvatar(Math.round(player.px + XOFF), Math.round(player.py - camY), player.dir, player.frame, PLAYER_COLORS);
 }
 
 /* ============================================================= *
@@ -776,7 +811,7 @@ function speak(lines, speaker, done){
 function setSpeaker(s){
   if(s==='mentor'){ dSpeaker.textContent='MENTOR'; dSpeaker.className='speaker mentor'; }
   else if(s==='you'){ dSpeaker.textContent='YOU'; dSpeaker.className='speaker'; }
-  else if(s==='sys'){ dSpeaker.textContent='THE BENCH'; dSpeaker.className='speaker'; }
+  else if(s==='sys'){ dSpeaker.textContent='THE GREEN ROOM'; dSpeaker.className='speaker'; }
   else { dSpeaker.textContent=s.toUpperCase(); dSpeaker.className='speaker'; }
 }
 
@@ -889,7 +924,7 @@ function nameBit(){ // company/role hint for callbacks, from the scraped profile
 
 function receptionDialogue(){
   const lines = [
-    {text:"Floor 11. It's late. You made it up here, which means you're serious enough to at least ask."},
+    {text:`The Green Room. ${whenBit()}. You made it up here, which means you're serious enough to at least ask.`},
     {text:"I read people deciding whether to blow two years and a house deposit on a degree. That's the job."},
     {text:"Before the room reads you — drop your LinkedIn. I'll pull your page while you walk."},
     {action:'profile'},
@@ -907,7 +942,7 @@ function dealDialogue(){
   const nm = nameBit();
   speak([
     {text:"The Deal Room. This is where we find out what you're actually chasing."},
-    {text:"It's 11pm. Why are you looking this up right now — honestly?"},
+    {text:`It's ${CLOCK}. Why are you looking this up right now — honestly?`},
     {key:'why_now', choices:[
       {label:"I feel stuck where I am", value:'stuck'},
       {label:"Everyone around me has one", value:'everyone'},
@@ -1000,7 +1035,7 @@ function alternativesDialogue(){
 function verdictDialogue(){
   speak([
     {text:"So. I've watched you walk the whole floor. I've got your answers in front of me."},
-    {text:"You want the honest read, not the comfortable one. That's why you came up here at 11pm instead of reading another listicle."},
+    {text:`You want the honest read, not the comfortable one. That's why you're up here ${whenClause()} instead of reading another listicle.`},
     {text:"Give me a second. I'm going to look at all of it at once — and call it."},
     {action:'generate'},
   ],'mentor', null);
@@ -1266,7 +1301,7 @@ async function renderCard(v){
     new Promise(r=>setTimeout(r,1200))
   ]);
   const W=1080,H=1350, m=64;
-  const paper='#F1E9D8', ink='#171512', coral='#EE4B36';
+  const paper='#EEF2DC', ink='#151A0F', coral='#D9E38A', mint='#6ED190', muted='#79855C';
   // frame
   cctx.fillStyle=ink; cctx.fillRect(0,0,W,H);
   cctx.fillStyle=paper; cctx.fillRect(m/2, m/2, W-m, H-m);
@@ -1277,7 +1312,7 @@ async function renderCard(v){
   // top label row
   cctx.fillStyle=ink; cctx.font='700 26px "Space Grotesk", sans-serif';
   cctx.textBaseline='alphabetic';
-  cctx.fillText('THE BENCH', x, y+8);
+  cctx.fillText('THE GREEN ROOM', x, y+8);
   cctx.fillStyle=coral;
   const rt='MBA VERDICT';
   cctx.textAlign='right'; cctx.fillText(rt, right, y+8); cctx.textAlign='left';
@@ -1285,13 +1320,13 @@ async function renderCard(v){
   y+=30; cctx.fillStyle=ink; cctx.fillRect(x,y,w,3); y+=52;
 
   // archetype eyebrow + badge
-  cctx.fillStyle='#8a8172'; cctx.font='700 22px "Space Grotesk", sans-serif';
+  cctx.fillStyle=muted; cctx.font='700 22px "Space Grotesk", sans-serif';
   cctx.fillText('YOUR ARCHETYPE', x, y); y+=16;
   const badge=(v.archetype||'').toUpperCase();
   cctx.font='900 40px "Archivo Black","Space Grotesk",sans-serif';
   const bw=cctx.measureText(badge).width;
   cctx.fillStyle=coral; roundRect(cctx, x, y, Math.min(bw+44, w), 66, 12); cctx.fill();
-  cctx.fillStyle='#fff'; cctx.fillText(badge, x+22, y+47);
+  cctx.fillStyle=ink; cctx.fillText(badge, x+22, y+47);
   y+=66+56;
 
   // headline (hero)
@@ -1312,12 +1347,12 @@ async function renderCard(v){
   cctx.fillStyle=ink; cctx.fillRect(x,y,w,2); y+=44;
 
   // THE READ
-  cctx.fillStyle='#8a8172'; cctx.font='700 22px "Space Grotesk",sans-serif';
+  cctx.fillStyle=muted; cctx.font='700 22px "Space Grotesk",sans-serif';
   cctx.fillText('THE READ', x, y); y+=34;
   cctx.font='600 30px "Space Grotesk",sans-serif';
   const pts=(v.data_points&&v.data_points.length)? v.data_points : ['—'];
   for(const p of pts){
-    cctx.fillStyle=coral; cctx.fillRect(x, y-22, 16, 16);
+    cctx.fillStyle=mint; cctx.fillRect(x, y-22, 16, 16);
     cctx.fillStyle=ink;
     const wl=wrap(cctx, p, w-40);
     let yy=y;
@@ -1328,18 +1363,18 @@ async function renderCard(v){
   // bottom coral band CTA
   const bandH=118, by=H-m/2-bandH-10;
   cctx.fillStyle=coral; cctx.fillRect(m/2, by, W-m, bandH);
-  cctx.fillStyle='#fff';
+  cctx.fillStyle=ink;
   cctx.font='900 40px "Archivo Black","Space Grotesk",sans-serif';
   cctx.fillText('Get your own read →', x, by+56);
   cctx.font='700 30px "Space Grotesk",sans-serif';
-  cctx.fillText('thebench.mba', x, by+96);
+  cctx.fillText('thegreenroom.mba', x, by+96);
 }
 function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 
 /* ---------- share / download ---------- */
 document.getElementById('dlBtn').onclick = ()=>{
   const a=document.createElement('a');
-  a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict-the-bench.png'; a.click();
+  a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict-the-green-room.png'; a.click();
   toast('Saved to your device');
 };
 document.getElementById('shareBtn').onclick = async ()=>{
@@ -1347,7 +1382,7 @@ document.getElementById('shareBtn').onclick = async ()=>{
     const blob = await new Promise(r=> cardCv.toBlob(r,'image/png'));
     const file = new File([blob],'mba-verdict.png',{type:'image/png'});
     if(navigator.canShare && navigator.canShare({files:[file]})){
-      await navigator.share({files:[file], title:'My MBA verdict', text:lastVerdict?('“'+lastVerdict.headline+'” — my read from The Bench'):''});
+      await navigator.share({files:[file], title:'My MBA verdict', text:lastVerdict?('“'+lastVerdict.headline+'” — my read from The Green Room'):''});
     } else {
       const a=document.createElement('a'); a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict.png'; a.click();
       toast('Saved — share it anywhere');
@@ -1355,7 +1390,7 @@ document.getElementById('shareBtn').onclick = async ()=>{
   }catch(e){ toast('Share canceled'); }
 };
 document.getElementById('copyBtn').onclick = async ()=>{
-  const line = lastVerdict? ('“'+lastVerdict.headline+'” — '+lastVerdict.final_call+' (my MBA read from The Bench)') : '';
+  const line = lastVerdict? ('“'+lastVerdict.headline+'” — '+lastVerdict.final_call+' (my MBA read from The Green Room)') : '';
   try{ await navigator.clipboard.writeText(line); toast('Line copied'); }
   catch(e){ toast('Copy not available'); }
 };
@@ -1417,7 +1452,7 @@ cv.addEventListener('pointerdown', e=>{
   if(state!=='playing') return;
   const rect=cv.getBoundingClientRect();
   const scaleX=VIEW_W/rect.width, scaleY=VIEW_H/rect.height;
-  const ix=(e.clientX-rect.left)*scaleX;
+  const ix=(e.clientX-rect.left)*scaleX - XOFF;
   const iy=(e.clientY-rect.top)*scaleY + camY;
   const tx=Math.floor(ix/TILE), ty=Math.floor(iy/TILE);
   // interactable adjacent to player?
@@ -1454,14 +1489,19 @@ function typeLoop(ts){
 }
 requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; requestAnimationFrame(loop); requestAnimationFrame(typeLoop); });
 
-/* ---- scale the whole game to fill the viewport (keeps 240:176, letterboxes sides) ---- */
-const _frameEl = document.querySelector('.frame');
-function fitFrame(){
-  const s = Math.min(window.innerWidth / 480, window.innerHeight / 352) * 0.98;
-  _frameEl.style.setProperty('--fit', s);
+/* ---- size the canvas to the viewport aspect so the floor fills the WHOLE screen ---- */
+function fit(){
+  const vw = window.innerWidth, vh = window.innerHeight;
+  // keep 176px tall (fixed zoom); widen the view to match the screen, clamped and even
+  VIEW_W = Math.min(560, Math.max(MAP_W*TILE, Math.round(VIEW_H * vw / vh / 2) * 2));
+  cv.width = VIEW_W;                       // NOTE: this resets the 2d context...
+  ctx.imageSmoothingEnabled = false;       // ...so re-disable smoothing every time
+  XOFF = Math.floor((VIEW_W - MAP_W*TILE) / 2);   // center the 15-tile map
 }
-window.addEventListener('resize', fitFrame);
-window.addEventListener('orientationchange', fitFrame);
-fitFrame();
+window.addEventListener('resize', fit);
+window.addEventListener('orientationchange', fit);
+fit();
+// real local time in the title bar
+document.getElementById('clockTag').textContent = CLOCK;
 </script>
 
