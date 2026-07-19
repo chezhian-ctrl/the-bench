@@ -161,6 +161,17 @@
   }
   .choice:hover{ background:var(--paper); }
   .choice:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.2); }
+  .freewrap{ display:flex; flex-direction:column; gap:7px; margin-top:11px; }
+  .freein{
+    width:100%; box-sizing:border-box; resize:none;
+    font-family:inherit; font-size:clamp(13px,1.15vw,17px); font-weight:500;
+    color:var(--ink); background:#fff; border:2px solid var(--ink); border-radius:8px;
+    padding:9px 11px; line-height:1.4;
+  }
+  .freein:focus{ outline:none; border-color:var(--mint); }
+  .freerow{ display:flex; gap:7px; }
+  .freerow .choice{ flex:1; justify-content:center; text-align:center; }
+  .freesend{ background:var(--coral); }
   .choice .k{
     font-family:"Press Start 2P"; font-size:8px; color:var(--ink); background:var(--coral);
     border-radius:4px; padding:4px 5px; margin-top:1px; flex:none;
@@ -312,7 +323,7 @@
     <!-- verdict -->
     <div id="verdict" class="layer hidden">
       <div class="vhead">Your read · The Green Room</div>
-      <div id="cardWrap"><canvas id="cardCanvas" width="1080" height="1350"></canvas></div>
+      <div id="cardWrap"><canvas id="cardCanvas" width="1080" height="1400"></canvas></div>
       <div id="vactions">
         <button class="btn mini" id="dlBtn">Download</button>
         <button class="btn mini" id="shareBtn">Share</button>
@@ -860,16 +871,68 @@ function showChoices(line){
     const b=document.createElement('button');
     b.className='choice';
     b.innerHTML=`<span class="k">${i+1}</span><span>${escapeHtml(ch.label)}</span>`;
-    b.onclick=(e)=>{ e.stopPropagation(); pickChoice(line,ch); };
+    b.onclick=(e)=>{ e.stopPropagation(); ch.free ? openFreeText(line) : pickChoice(line,ch); };
     choicesEl.appendChild(b);
   });
 }
 function pickChoice(line,ch){
+  if(ch.free){ openFreeText(line); return; }
   if(line.key) answers[line.key]=ch.value;
   awaitChoice=false; clearChoices();
   di++; nextLine();
 }
 function clearChoices(){ awaitChoice=false; choicesEl.innerHTML=''; }
+
+// ---- free-text: type your own answer, mentor reacts live (stage:'react') ----
+function openFreeText(line){
+  awaitChoice=true;
+  choicesEl.innerHTML='';
+  const wrap=document.createElement('div'); wrap.className='freewrap';
+  const ta=document.createElement('textarea'); ta.className='freein'; ta.rows=2;
+  ta.placeholder='Say it in your own words…'; ta.maxLength=600;
+  const row=document.createElement('div'); row.className='freerow';
+  const back=document.createElement('button'); back.className='choice'; back.textContent='← back to options';
+  const send=document.createElement('button'); send.className='choice freesend'; send.textContent='Say it →';
+  back.onclick=(e)=>{ e.stopPropagation(); showChoices(line); };
+  send.onclick=(e)=>{ e.stopPropagation(); const t=ta.value.trim(); if(!t){ ta.focus(); return; } submitFreeText(line,t); };
+  ta.addEventListener('keydown',(e)=>{ e.stopPropagation(); if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){ e.preventDefault(); send.click(); } });
+  row.appendChild(back); row.appendChild(send);
+  wrap.appendChild(ta); wrap.appendChild(row);
+  choicesEl.appendChild(wrap);
+  setTimeout(()=>ta.focus(),40);
+}
+async function submitFreeText(line, text){
+  if(line.key){ answers[line.key]='custom'; freetext[line.key]=text; }
+  awaitChoice=false; clearChoices();
+  awaitAction=true;                                   // block taps while the mentor thinks
+  setSpeaker('mentor');
+  dText.innerHTML='<span class="cursor show">▌</span>';
+  const reply = await reactMentor(line.key, line.q || '', text);
+  const echo = text.length>150 ? text.slice(0,150)+'…' : text;
+  dq.splice(di+1, 0, {speaker:'you', text:echo}, {speaker:'mentor', text:reply});
+  awaitAction=false;
+  di++; nextLine();
+}
+async function reactMentor(key, promptText, text){
+  if(WEBHOOK_URL){
+    try{
+      const res=await fetch(WEBHOOK_URL,{ method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ stage:'react', profile, signals:profile.signals, question:key, prompt_text:promptText, text, answers }) });
+      if(res.ok){ const d=await res.json(); const r=(d.reply||'').trim(); if(r) return r; }
+    }catch(e){}
+  }
+  return fallbackReact(key, text);
+}
+function fallbackReact(key, text){
+  const nm=firstName();
+  const pool=[
+    "Noted — and I'll hold you to it when I call this.",
+    "Fair. Let's see if the rest of your answers back that up.",
+    (nm?nm+', that':"That")+"'s honest. Keep walking.",
+    "Okay. That tells me more than the buttons would have."
+  ];
+  return pool[Math.floor(Math.random()*pool.length)];
+}
 
 function advanceDialogue(){
   if(awaitChoice) return;      // must pick a choice
@@ -915,7 +978,9 @@ const WEBHOOK_URL = 'https://n8n.mesaschool.co.in/webhook/bench';
 
 let linkedinUrl = '';
 let profileLoaded = false;
-let profile = { name:'', role:'', company:'', headline:'', years:'', about:'', skills:'' };
+let profile = { name:'', role:'', company:'', headline:'', years:'', about:'', skills:'', signals:{} };
+let opener = '';            // Claude's cold-read greeting (from the profile call)
+const freetext = {};        // free-text answers the player typed, by question key
 
 function firstName(){ return (profile.name||'').trim().split(/\s+/)[0] || ''; }
 function nameBit(){ // company/role hint for callbacks, from the scraped profile
@@ -929,9 +994,11 @@ function receptionDialogue(){
     {text:"Before the room reads you — drop your LinkedIn. I'll pull your page while you walk."},
     {action:'profile'},
     // resumes here after the modal + scrape — evaluated at display time so it sees what came back:
-    {textFn: ()=> profileLoaded
-        ? `${firstName()? firstName()+'. ' : ''}Got it — ${profile.role||'read your page'}${profile.company? ' at '+profile.company : ''}. That's plenty to work with.`
-        : "Your page is being coy — or you skipped it. Fine. I'll read you off your answers alone, then."},
+    {textFn: ()=> opener
+        ? opener
+        : (profileLoaded
+            ? `${firstName()? firstName()+'. ' : ''}Got it — ${profile.role||'read your page'}${profile.company? ' at '+profile.company : ''}. That's plenty to work with.`
+            : "Your page is being coy — or you skipped it. Fine. I'll read you off your answers alone, then.")},
     {text:"Walk up. First door's open. Talk to the terminal in each room — that's me. Don't overthink the answers."},
   ];
   speak(lines,'mentor', ()=> unlockDoor(32, receptionInter()));
@@ -943,11 +1010,12 @@ function dealDialogue(){
   speak([
     {text:"The Deal Room. This is where we find out what you're actually chasing."},
     {text:`It's ${CLOCK}. Why are you looking this up right now — honestly?`},
-    {key:'why_now', choices:[
+    {key:'why_now', q:"Why are you looking this up right now — honestly?", choices:[
       {label:"I feel stuck where I am", value:'stuck'},
       {label:"Everyone around me has one", value:'everyone'},
       {label:"There's a specific role I can't reach", value:'specific_role'},
       {label:"I want a reset / something new", value:'reset'},
+      {label:"✎ Say it in your own words", value:'__free__', free:true},
     ]},
     {text:"Finish it: 'I want an MBA because I'm running...'"},
     {key:'running', choices:[
@@ -984,6 +1052,9 @@ function numbersDialogue(){
       {label:"Employer / scholarship", value:'employer'},
       {label:"Haven't thought about it", value:'unsure'},
     ]},
+    { textFn: ()=>{ const lvl=answers.level;
+        const mult = lvl==='top'?'3x+' : lvl==='senior'?'~3x' : lvl==='mid'?'~2.5x' : '~2x';
+        return `Do the real math: two years out of the market plus fees is roughly ${mult} what you make in a year — gone before the first new paycheck. Sit with that.`; } },
     { text: runningAway
         ? "So you're funding an escape. That math is worse than it looks. Onward."
         : "Fine. The network's the next question — and it's the one people lie to themselves about." },
@@ -994,18 +1065,20 @@ function networkDialogue(){
   speak([
     {text:"The Network Room. Everyone says they're here for 'the network.' Let's test it."},
     {text:"Be honest: do you want the MBA, or the people it puts you next to?"},
-    {key:'want', choices:[
+    {key:'want', q:"Do you want the MBA, or the people it puts you next to? What are you really optimizing for?", choices:[
       {label:"The network, mostly", value:'network'},
       {label:"The brand on my resume", value:'brand'},
       {label:"The actual skills", value:'skills'},
       {label:"All of it — I know", value:'all'},
+      {label:"✎ Say it in your own words", value:'__free__', free:true},
     ]},
     {text:"Name one door that network opens that you can't open yourself."},
-    {key:'door', choices:[
+    {key:'door', q:"Name one door that network opens that you can't open yourself.", choices:[
       {label:"An industry I can't break into", value:'industry'},
       {label:"Investors / co-founders", value:'investors'},
       {label:"Senior mentors & sponsors", value:'mentors'},
       {label:"...honestly, I can't name one", value:'cant_name'},
+      {label:"✎ Say it in your own words", value:'__free__', free:true},
     ]},
     { textFn: ()=> answers.door==='cant_name'
         ? "You couldn't name one. Hold onto that feeling — it matters in the last room."
@@ -1140,8 +1213,9 @@ async function scrapeProfile(url){
     profile={
       name:p.name||'', role:p.role||'', company:p.company||'',
       headline:p.headline||'', years:(p.years!=null?String(p.years):''),
-      about:p.about||'', skills:p.skills||''
+      about:p.about||'', skills:p.skills||'', signals:(p.signals||{})
     };
+    opener = (data.opener || p.opener || '').trim();
     profileLoaded = !!(profile.name || profile.role || profile.headline || profile.company);
     return profileLoaded;
   }catch(e){ profileLoaded=false; return false; }
@@ -1202,12 +1276,22 @@ function cycleLoad(){
 
 let lastVerdict=null;
 
+const LEVELS = ["go","conditional","not_yet","skip"];
+function normalizeLevel(lvl, finalCall){
+  if(LEVELS.includes(lvl)) return lvl;
+  const fc=(finalCall||'').toLowerCase();
+  if(/go for|^worth it\.?$|absolutely|do it/.test(fc)) return 'go';
+  if(/condition|only|t15|top program|if /.test(fc)) return 'conditional';
+  if(/not yet|not this|wait|revisit/.test(fc)) return 'not_yet';
+  return 'skip';
+}
+
 async function callMentor(){
   if(WEBHOOK_URL){
     try{
       const res = await fetch(WEBHOOK_URL,{
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ stage:'verdict', linkedin_url:linkedinUrl, profile, answers })
+        body: JSON.stringify({ stage:'verdict', linkedin_url:linkedinUrl, profile, signals:profile.signals, answers, freetext })
       });
       if(!res.ok) throw new Error("http "+res.status);
       const data = await res.json();
@@ -1216,6 +1300,10 @@ async function callMentor(){
       if(!Array.isArray(obj.data_points)) obj.data_points=[];
       obj.data_points = obj.data_points.slice(0,3);
       if(!ARCHETYPES.includes(obj.archetype)) obj.archetype = closestArchetype(obj.archetype);
+      obj.call_level = normalizeLevel(obj.call_level, obj.final_call);
+      obj.read = obj.read || obj.detail || '';
+      obj.archetype_line = obj.archetype_line || '';
+      obj.unlock = obj.unlock || '';
       return obj;
     } catch(e){
       /* fall through to the local deterministic read */
@@ -1231,52 +1319,70 @@ function closestArchetype(a){
   return ARCHETYPES.find(x=>a.includes(x.toLowerCase().replace('the ','')))||ARCHETYPES[1];
 }
 
-// deterministic read so the loop works even with no API (e.g. opened offline)
+// deterministic read so the loop works with no API (offline). Calibrated to the
+// same 4-level spectrum as the backend — NOT skip-biased.
 function fallbackVerdict(){
-  const a=answers, nm=nameBit();
-  let arche, call, head, detail;
-  const damning=[];
-  if(a.funding==='loans') damning.push("You'd fund all of it on debt.");
-  if(a.funding==='unsure') damning.push("You haven't thought about who pays.");
-  if(a.door==='cant_name') damning.push("You couldn't name one door it opens.");
-  if(a.applied==='not_yet') damning.push("You haven't applied to the jobs yet.");
-  if(a.alt_tradeoff==='maybe_not'||a.alt_tradeoff==='no') damning.push("A cheaper path gets you most of the way.");
-  if(a.want==='brand') damning.push("You want the logo, not the learning.");
-  if(a.running==='away') damning.push("You're running from the job, not toward a plan.");
-  if(a.why_now==='everyone') damning.push("You're doing it because your feed is.");
+  const a=answers, s=(profile.signals||{}), nm=nameBit();
+  let sc=0;
+  sc += ({specific_role:2, stuck:0, reset:-1, everyone:-2}[a.why_now] || 0);
+  sc += ({toward:2, unsure:0, away:-2}[a.running] || 0);
+  sc += ({early:1, mid:1, senior:0, top:-1}[a.level] || 0);
+  sc += ({switch:2, high_finance:2, same_senior:0, none:-2}[a.target] || 0);
+  sc += ({employer:2, savings:1, loans:-1, unsure:-2}[a.funding] || 0);
+  sc += ({skills:1, network:1, all:0, brand:-2}[a.want] || 0);
+  sc += ({industry:2, investors:1, mentors:1, cant_name:-2}[a.door] || 0);
+  sc += ({still_full:2, maybe_not:-1, no:-2}[a.alt_tradeoff] || 0);
+  sc += ({rejected:2, half:0, not_yet:-1}[a.applied] || 0);
+  if(s.has_mba) sc-=3;
+  if(s.years>=12) sc-=1;
 
-  if(a.running==='away' || a.why_now==='reset' || (a.why_now==='stuck'&&a.door==='cant_name')){
-    arche="The Fear Applicant"; call="Not an MBA problem.";
-    head="You don't need an MBA — you need a reason.";
-    detail=`You're ${nm?`still at ${nm} and `:''}running from something, not toward it. An MBA won't fix a motivation you can't name. Sit with the fear before you spend two years outrunning it.`;
-  } else if(a.want==='brand' || (a.want==='network'&&a.door==='cant_name')){
-    arche="The Brand Chaser"; call="Skip it — for now.";
-    head="You want the logo more than the learning.";
-    detail="You're buying a brand to feel legitimate. That's expensive therapy. Go earn the thing the logo signals, then reconsider from strength.";
-  } else if((a.target==='switch'||a.target==='high_finance') && a.running==='toward'){
-    arche="The Pivot Case";
-    if(a.funding==='loans'){ call="Worth it — T15 only, if funded."; head="Worth it, but only a top program and only on someone else's dime."; }
-    else { call="Worth it."; head="The switch is real — this is the bridge."; }
-    detail="You're making a genuine pivot and the network is the actual mechanism, not a nice-to-have. Just don't pay sticker price on loans to do it — the brand tier matters here more than anywhere.";
-  } else if(a.alt_tradeoff==='maybe_not' || a.alt_tradeoff==='no'){
-    arche="The Long-Way-Rounder"; call="Skip it.";
-    head="You already admitted the cheaper path works.";
-    detail="You flinched when I offered you 80% for 5%. That flinch is your answer. Take the shorter road and keep the house deposit.";
-  } else if(a.applied==='not_yet' && (a.target==='same_senior'||a.target==='none')){
-    arche="The Undervalued Operator"; call="You have a resume problem.";
-    head="Not an MBA problem — a resume problem.";
-    detail=`You're good at the job${nm?` at ${nm}`:''} and underpriced, not under-credentialed. Apply to the roles you think you need the degree for. Get rejected first. Then we'll talk.`;
-  } else if(a.running==='toward' && a.door!=='cant_name' && a.funding!=='unsure'){
-    arche="The Actually Ready One"; call="Worth it.";
-    head="You're the rare one who actually should. Go.";
-    detail="You know the job, you can name the door, and you've thought about the money. That's most people's whole problem, solved. Stop asking the internet and start the application.";
-  } else {
-    arche="The Undervalued Operator"; call="Skip it — for now.";
-    head="You're underpriced, not under-credentialed.";
-    detail="Nothing in your answers says the degree unlocks something you can't reach cheaper. Push on your current track for a year first — the case will be obvious if it's real.";
-  }
-  while(damning.length<3) damning.push("");
-  return { archetype:arche, headline:head, final_call:call, data_points:damning.filter(Boolean).slice(0,3), detail };
+  const level = sc>=4?'go' : sc>=1?'conditional' : sc>=-2?'not_yet' : 'skip';
+  const call = {go:'Go for it.', conditional:'Worth it - with conditions.', not_yet:'Not yet.', skip:'Skip it.'}[level];
+
+  let arche;
+  if(s.has_mba) arche='The Undervalued Operator';
+  else if(a.want==='brand') arche='The Brand Chaser';
+  else if(a.running==='away' || a.why_now==='reset') arche='The Fear Applicant';
+  else if((a.target==='switch'||a.target==='high_finance') && a.running==='toward') arche='The Pivot Case';
+  else if(a.alt_tradeoff==='maybe_not' || a.alt_tradeoff==='no') arche='The Long-Way-Rounder';
+  else if(level==='go' && a.running==='toward') arche='The Actually Ready One';
+  else arche='The Undervalued Operator';
+
+  const who = s.has_mba ? "You already hold the degree you're asking about"
+    : s.is_founder ? `You're already building${nm?` at ${nm}`:''}`
+    : nm ? `${profile.role||'Where you are'}${profile.company?` at ${profile.company}`:''}` : 'On your answers alone';
+
+  const heads={ go:"You can name the door. Go open it.",
+    conditional:"Worth it — but only on the right terms.",
+    not_yet:"Not the wrong idea. The wrong year.",
+    skip:"You're chasing a credential you don't need." };
+  const reads={
+    go:`${who}, and you're pointed at a specific target with the money thought through. That's the whole game most people never solve. Stop polling the internet and start the application.`,
+    conditional:`${who}. The case is real, but it only pays if a top program and funded terms line up — otherwise the math turns on you. Get the offer and the money right, then commit.`,
+    not_yet:`${who}. Nothing here says the degree unlocks something you can't reach cheaper this year. Push your current track twelve months; if the ceiling is real, the case gets obvious.`,
+    skip:`${who}. You'd be buying a signal you can largely earn without the two years and the debt. Spend that energy on the jobs themselves first.` };
+  const unlocks={ go:"Nothing — the only risk left is not applying.",
+    conditional:"A T15 admit with real funding flips this to a clear yes.",
+    not_yet:"Get rejected from the roles you want first — then the case is earned.",
+    skip:"A specific door only the degree opens would change this." };
+
+  const dp=[];
+  if(s.years) dp.push(`${s.years} yrs in${s.num_companies?`, ${s.num_companies} companies`:''}`);
+  if(s.has_mba) dp.push('Already holds an MBA');
+  if(a.funding==='loans') dp.push('All of it on debt');
+  if(a.door==='cant_name') dp.push("Couldn't name one door");
+  if(a.target==='switch'||a.target==='high_finance') dp.push('A real pivot on the table');
+  if(a.applied==='rejected') dp.push('Already hit the wall unaided');
+  if(a.want==='brand') dp.push('Wants the logo');
+  while(dp.length<2) dp.push('');
+
+  return {
+    archetype:arche,
+    archetype_line:`${arche.replace('The ','')}: ${a.running==='toward'?'moving toward something real':'still naming what this is for'}.`,
+    headline:heads[level], read:reads[level], unlock:unlocks[level],
+    final_call:call, call_level:level,
+    data_points:dp.filter(Boolean).slice(0,3)
+  };
 }
 
 /* ---------- card rendering (poster, exports to PNG) ---------- */
@@ -1300,74 +1406,100 @@ async function renderCard(v){
     (document.fonts?document.fonts.ready:Promise.resolve()),
     new Promise(r=>setTimeout(r,1200))
   ]);
-  const W=1080,H=1350, m=64;
-  const paper='#EEF2DC', ink='#151A0F', coral='#D9E38A', mint='#6ED190', muted='#79855C';
+  const W=1080,H=1400, m=64;
+  const paper='#EEF2DC', ink='#151A0F', lime='#D9E38A', mint='#6ED190', muted='#79855C';
+  const LEVELCOL={ go:'#6ED190', conditional:'#D9E38A', not_yet:'#E7B24A', skip:'#D98C6A' };
+  const chipCol = LEVELCOL[v.call_level] || lime;
+
   // frame
   cctx.fillStyle=ink; cctx.fillRect(0,0,W,H);
   cctx.fillStyle=paper; cctx.fillRect(m/2, m/2, W-m, H-m);
-  // inner content margins
   const x=m+18, right=W-m-18, w=right-x;
-  let y=m+34;
+  let y=m+30;
+
+  const trunc=(s,maxW)=>{ if(cctx.measureText(s).width<=maxW) return s; let t=s;
+    while(t.length>1 && cctx.measureText(t+'…').width>maxW) t=t.slice(0,-1); return t+'…'; };
+  const eyebrow=(t)=>{ cctx.fillStyle=muted; cctx.font='700 22px "Space Grotesk",sans-serif'; cctx.fillText(t, x, y); y+=34; };
 
   // top label row
+  cctx.textBaseline='alphabetic'; cctx.textAlign='left';
   cctx.fillStyle=ink; cctx.font='700 26px "Space Grotesk", sans-serif';
-  cctx.textBaseline='alphabetic';
   cctx.fillText('THE GREEN ROOM', x, y+8);
-  cctx.fillStyle=coral;
-  const rt='MBA VERDICT';
-  cctx.textAlign='right'; cctx.fillText(rt, right, y+8); cctx.textAlign='left';
-  // hairline
-  y+=30; cctx.fillStyle=ink; cctx.fillRect(x,y,w,3); y+=52;
+  cctx.fillStyle=ink; cctx.textAlign='right'; cctx.fillText('MBA VERDICT', right, y+8); cctx.textAlign='left';
+  y+=30; cctx.fillStyle=ink; cctx.fillRect(x,y,w,3); y+=40;
 
-  // archetype eyebrow + badge
-  cctx.fillStyle=muted; cctx.font='700 22px "Space Grotesk", sans-serif';
-  cctx.fillText('YOUR ARCHETYPE', x, y); y+=16;
+  // who (from LinkedIn) — only if present
+  const nm=(profile.name||'').trim();
+  if(nm){
+    const roleCo=[profile.role, profile.company].filter(Boolean).join(', ');
+    const line=(nm + (roleCo? '   ·   '+roleCo : '')).toUpperCase();
+    cctx.fillStyle=ink; cctx.font='700 24px "Space Grotesk",sans-serif';
+    cctx.fillText(trunc(line, w), x, y); y+=40;
+  }
+
+  // archetype
+  eyebrow('YOUR ARCHETYPE');
   const badge=(v.archetype||'').toUpperCase();
-  cctx.font='900 40px "Archivo Black","Space Grotesk",sans-serif';
+  cctx.font='900 38px "Archivo Black","Space Grotesk",sans-serif';
   const bw=cctx.measureText(badge).width;
-  cctx.fillStyle=coral; roundRect(cctx, x, y, Math.min(bw+44, w), 66, 12); cctx.fill();
-  cctx.fillStyle=ink; cctx.fillText(badge, x+22, y+47);
-  y+=66+56;
+  cctx.fillStyle=lime; roundRect(cctx, x, y, Math.min(bw+40, w), 62, 12); cctx.fill();
+  cctx.fillStyle=ink; cctx.fillText(badge, x+20, y+45); y+=62+14;
+  if(v.archetype_line){
+    cctx.fillStyle=ink; cctx.font='500 italic 26px "Space Grotesk",sans-serif';
+    for(const ln of wrap(cctx, v.archetype_line, w)){ cctx.fillText(ln, x, y+22); y+=34; }
+  }
+  y+=30;
 
   // headline (hero)
-  cctx.fillStyle=ink; cctx.font='900 66px "Archivo Black","Space Grotesk",sans-serif';
-  const hl=wrap(cctx, '“'+(v.headline||'')+'”', w);
-  for(const ln of hl){ cctx.fillText(ln, x, y); y+=74; }
-  y+=6;
+  cctx.fillStyle=ink; cctx.font='900 56px "Archivo Black","Space Grotesk",sans-serif';
+  for(const ln of wrap(cctx, '“'+(v.headline||'')+'”', w)){ cctx.fillText(ln, x, y+40); y+=64; }
+  y+=18;
 
-  // final call chip
+  // final-call chip (colored by level)
   const call=(v.final_call||'').toUpperCase();
   cctx.font='800 30px "Space Grotesk",sans-serif';
   const cw=cctx.measureText(call).width;
-  cctx.fillStyle=ink; roundRect(cctx, x, y, cw+40, 56, 10); cctx.fill();
-  cctx.fillStyle=paper; cctx.fillText(call, x+20, y+38);
-  y+=56+54;
+  cctx.fillStyle=chipCol; roundRect(cctx, x, y, cw+44, 58, 12); cctx.fill();
+  cctx.fillStyle=ink; cctx.fillText(call, x+22, y+39); y+=58+40;
 
   // divider
-  cctx.fillStyle=ink; cctx.fillRect(x,y,w,2); y+=44;
+  cctx.fillStyle=ink; cctx.fillRect(x,y,w,2); y+=40;
 
-  // THE READ
-  cctx.fillStyle=muted; cctx.font='700 22px "Space Grotesk",sans-serif';
-  cctx.fillText('THE READ', x, y); y+=34;
-  cctx.font='600 30px "Space Grotesk",sans-serif';
-  const pts=(v.data_points&&v.data_points.length)? v.data_points : ['—'];
-  for(const p of pts){
-    cctx.fillStyle=mint; cctx.fillRect(x, y-22, 16, 16);
-    cctx.fillStyle=ink;
-    const wl=wrap(cctx, p, w-40);
-    let yy=y;
-    wl.forEach((ln,i)=>{ cctx.fillText(ln, x+34, yy); yy+= (i<wl.length-1?38:0); });
-    y=yy+46;
+  // the read
+  eyebrow('THE READ');
+  cctx.fillStyle=ink; cctx.font='500 29px "Space Grotesk",sans-serif';
+  for(const ln of wrap(cctx, v.read||'', w)){ cctx.fillText(ln, x, y+22); y+=40; }
+  y+=22;
+
+  // evidence bullets
+  const pts=(v.data_points&&v.data_points.length)? v.data_points.filter(Boolean) : [];
+  if(pts.length){
+    cctx.font='600 27px "Space Grotesk",sans-serif';
+    for(const p of pts){
+      cctx.fillStyle=mint; cctx.fillRect(x, y+4, 15, 15);
+      cctx.fillStyle=ink;
+      const wl=wrap(cctx, p, w-38); let yy=y;
+      wl.forEach((ln,i)=>{ cctx.fillText(ln, x+32, yy+18); yy+=(i<wl.length-1?34:0); });
+      y=yy+40;
+    }
+    y+=6;
   }
 
-  // bottom coral band CTA
-  const bandH=118, by=H-m/2-bandH-10;
-  cctx.fillStyle=coral; cctx.fillRect(m/2, by, W-m, bandH);
+  // what would change it
+  if(v.unlock){
+    eyebrow('WHAT WOULD CHANGE IT');
+    cctx.fillStyle=ink; cctx.font='500 italic 27px "Space Grotesk",sans-serif';
+    for(const ln of wrap(cctx, v.unlock, w)){ cctx.fillText(ln, x, y+20); y+=36; }
+  }
+
+  // bottom CTA band
+  const bandH=118, by=H-m/2-bandH-8;
+  cctx.fillStyle=lime; cctx.fillRect(m/2, by, W-m, bandH);
   cctx.fillStyle=ink;
-  cctx.font='900 40px "Archivo Black","Space Grotesk",sans-serif';
-  cctx.fillText('Get your own read →', x, by+56);
-  cctx.font='700 30px "Space Grotesk",sans-serif';
-  cctx.fillText('thegreenroom.mba', x, by+96);
+  cctx.font='900 38px "Archivo Black","Space Grotesk",sans-serif';
+  cctx.fillText('Get your own read →', x, by+54);
+  cctx.font='700 28px "Space Grotesk",sans-serif';
+  cctx.fillText('thegreenroom.mba', x, by+92);
 }
 function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 
