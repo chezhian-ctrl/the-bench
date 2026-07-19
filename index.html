@@ -201,6 +201,14 @@
     font-family:inherit; font-size:13px; background:#fff; color:var(--ink);
   }
   #purl:focus{ outline:none; border-color:var(--mint); }
+  .phrow{ display:flex; gap:8px; }
+  .phrow input{
+    border:2px solid var(--ink); border-radius:9px; padding:12px 10px;
+    font-family:inherit; font-size:13px; background:#fff; color:var(--ink);
+  }
+  .phrow input:focus{ outline:none; border-color:var(--mint); }
+  .phrow .ccinput{ width:64px; text-align:center; flex:0 0 auto; }
+  .phrow input#pnum{ flex:1 1 auto; min-width:0; }
   .perr{ color:var(--accent-ink); font-size:11px; font-weight:700; margin-top:7px; }
   .hint{ font-size:10.5px; color:#6a655b; margin-top:8px; line-height:1.4; }
   .row{ display:flex; gap:9px; margin-top:11px; }
@@ -333,18 +341,35 @@
       <div class="vhead">Your read · The Green Room</div>
       <div id="cardWrap"><canvas id="cardCanvas" width="1080" height="1400"></canvas></div>
       <div id="vactions">
-        <button class="btn mini" id="dlBtn">Download</button>
-        <button class="btn mini" id="shareBtn">Share</button>
+        <button class="btn mini" id="sendBtn">📲 Send me the report</button>
       </div>
       <div id="vsecondary">
-        <button class="btn ghost mini" id="copyBtn">Copy the line</button>
+        <button class="btn ghost mini" id="dlBtn">Download</button>
         <button class="btn ghost mini" id="againBtn">Play again</button>
+      </div>
+    </div>
+
+    <!-- phone capture modal (send report to WhatsApp) -->
+    <div id="phone" class="layer hidden">
+      <div class="card-modal">
+        <h3>Get your read on WhatsApp.</h3>
+        <p>Drop your number and I'll send the full card straight to your chat — yours to keep and share.</p>
+        <div class="phrow">
+          <input id="pcc" class="ccinput" inputmode="tel" spellcheck="false" value="+91" />
+          <input id="pnum" inputmode="numeric" autocomplete="tel" spellcheck="false" placeholder="98765 43210" />
+        </div>
+        <div id="phoneErr" class="perr hidden">Enter a valid number with your country code.</div>
+        <div class="row">
+          <button class="btn mini" id="pSend">Send it →</button>
+          <button class="btn ghost mini" id="pBack">Back</button>
+        </div>
+        <div class="hint">You'll get one WhatsApp message with your report link.</div>
       </div>
     </div>
 
     <div id="toast"></div>
   </div>
-  <div class="credit">A frontend prototype · verdict powered by <b>Claude</b> · card is the product, the game is the wrapper · <b>build 4</b></div>
+  <div class="credit">A frontend prototype · verdict powered by <b>Claude</b> · card is the product, the game is the wrapper · <b>build 5</b></div>
 </div>
 
 <script>
@@ -727,7 +752,7 @@ function render(){
     for(let i=0;i<cols;i++){ drawFloorTile(i*TILE, sy, (i+y)%2===0); }
   }
   // ambient life in the open side floor (decorative)
-  drawAmbient();
+  drawSideProps();
   // the room map, centered by XOFF
   for(let y=startY; y<endY; y++){
     for(let x=0; x<MAP_W; x++){
@@ -756,78 +781,84 @@ function render(){
 }
 
 /* ============================================================= *
- *  AMBIENT LIFE  — pedestrians strolling the open side floor.
- *  Purely decorative. Some stare at phones and walk into each other.
+ *  SIDE DECOR  — static furniture dressing the open floor beside
+ *  the rooms: plants, lounge sofas, shelves, a coffee cart, art.
  * ============================================================= */
-const AMB_PAL = [
-  {skin:'#caa06e', top:'#6ED190', leg:'#37471F', hair:'#241c14'},
-  {skin:'#e8b98a', top:'#D9E38A', leg:'#3E4A22', hair:'#4a3b2a'},
-  {skin:'#b07d4e', top:'#7FA592', leg:'#20261A', hair:'#1a1512'},
-  {skin:'#d8a679', top:'#A97C4E', leg:'#37471F', hair:'#3a2e1e'},
-  {skin:'#c99a66', top:'#5FBF86', leg:'#2a3318', hair:'#211a12'},
-  {skin:'#e0b487', top:'#C9D46E', leg:'#333d1c', hair:'#2e2418'},
-];
-let ambient = [];
-function newAmb(side, fresh){
+const SIDE_PROP_TYPES = ['plant','sofa','cooler','shelf','plantBig','lamp','art','rug','cart'];
+let sideProps = [];
+function initSideProps(){
+  sideProps = [];
   const worldH = MAP_H*TILE;
-  const dir = Math.random()<0.5 ? 1 : -1;               // +1 down, -1 up
-  const worldY = fresh ? Math.random()*worldH
-                       : (dir>0 ? camY-24 : camY+VIEW_H+24);
-  return {
-    side, lane:0.18+Math.random()*0.64, worldY,
-    vy: dir*(14+Math.random()*24),                      // px / sec
-    pal: AMB_PAL[(Math.random()*AMB_PAL.length)|0],
-    phone: Math.random()<0.55,                          // over half are on their phones
-    frame:0, ft:0, bump:0
-  };
-}
-function initAmbient(){ ambient=[]; for(let i=0;i<9;i++) ambient.push(newAmb(i%2?'R':'L', true)); }
-function updateAmbient(dt){
-  for(const a of ambient){
-    if(a.bump>0){ a.bump-=dt; }
-    else{
-      a.worldY += a.vy*dt/1000;
-      a.ft+=dt; if(a.ft>170){ a.ft=0; a.frame^=1; }
-    }
-    const sy=a.worldY-camY;
-    if(sy < -48 || sy > VIEW_H+48) Object.assign(a, newAmb(a.side, false));
-  }
-  // head-on collisions: same side, near lane, opposite direction, phone-zombies don't dodge
-  for(let i=0;i<ambient.length;i++) for(let j=i+1;j<ambient.length;j++){
-    const a=ambient[i], b=ambient[j];
-    if(a.side!==b.side || a.bump>0 || b.bump>0) continue;
-    if(Math.abs(a.lane-b.lane)>0.13) continue;
-    if((a.vy>0)===(b.vy>0)) continue;
-    if(Math.abs(a.worldY-b.worldY) < 11){
-      a.bump=b.bump=720;                                // freeze ~0.7s, flash "!"
-      if(a.lane<=b.lane){ a.lane=Math.max(0.06,a.lane-0.13); b.lane=Math.min(0.94,b.lane+0.13); }
-      else { a.lane=Math.min(0.94,a.lane+0.13); b.lane=Math.max(0.06,b.lane-0.13); }
+  let ti = 0;
+  for(const side of ['L','R']){
+    let y = 26 + (side==='R' ? 34 : 0);            // stagger the two columns
+    while(y < worldH-22){
+      const type = SIDE_PROP_TYPES[ti % SIDE_PROP_TYPES.length];
+      sideProps.push({ side, worldY:y, type, lane: 0.5 + ((ti%3)-1)*0.17 });
+      y += 54 + (ti%3)*16;
+      ti++;
     }
   }
 }
-function drawAmbient(){
+function drawSideProps(){
   const rightX0 = XOFF + MAP_W*TILE;
   const leftW = XOFF, rightW = VIEW_W - rightX0;
-  for(const a of ambient){
-    const laneW = a.side==='L' ? leftW : rightW;
-    if(laneW < 20) continue;                            // no room on narrow screens
-    const baseX = a.side==='L' ? 0 : rightX0;
-    const sx = Math.round(baseX + 5 + a.lane*(laneW-14));
-    const sy = Math.round(a.worldY - camY);
-    if(sy<-24 || sy>VIEW_H+8) continue;
-    drawPed(sx, sy, a);
+  for(const s of sideProps){
+    const laneW = s.side==='L' ? leftW : rightW;
+    if(laneW < 22) continue;                        // no room on narrow screens
+    const baseX = s.side==='L' ? 0 : rightX0;
+    const cx = Math.round(baseX + s.lane*laneW);
+    const sy = Math.round(s.worldY - camY);
+    if(sy < -30 || sy > VIEW_H+8) continue;
+    drawProp(s.type, cx, sy);
   }
 }
-function drawPed(sx, sy, a){
-  const p=a.pal, bob=(a.bump>0)?0:(a.frame?1:0);
-  ctx.fillStyle='rgba(0,0,0,0.16)'; ctx.fillRect(sx+1, sy+11, 6, 2);        // shadow
-  ctx.fillStyle=p.leg; ctx.fillRect(sx+1, sy+7+bob, 2, 4); ctx.fillRect(sx+5, sy+7-bob, 2, 4); // legs
-  ctx.fillStyle=p.top; ctx.fillRect(sx+1, sy+3, 6, 5);                      // torso
-  ctx.fillStyle=p.skin; ctx.fillRect(sx+2, sy, 4, 4);                       // head
-  ctx.fillStyle=p.hair; ctx.fillRect(sx+2, sy, 4, 1); ctx.fillRect(sx+2, sy, 1, 3);
-  if(a.phone){ ctx.fillStyle=p.skin; ctx.fillRect(sx, sy+4, 2, 2);          // arm holding phone
-    ctx.fillStyle='#EAF4B0'; ctx.fillRect(sx-1, sy+4, 2, 2); }             // phone glow
-  if(a.bump>0){ ctx.fillStyle='#D98C6A'; ctx.fillRect(sx+3, sy-5, 1, 3); ctx.fillRect(sx+3, sy-1, 1, 1); } // "!"
+function drawProp(type, cx, y){
+  const P={ leaf:'#3E9E63', leaf2:'#6ED190', pot:'#A97C4E', wood:'#8a6238', dark:'#20261A',
+            glass:'#7FA592', lime:'#D9E38A', metal:'#5c6650', cushion:'#C9D46E' };
+  const sh=(w,dy)=>{ ctx.fillStyle='rgba(0,0,0,0.13)'; ctx.fillRect(cx-(w>>1), y+dy, w, 2); };
+  if(type==='plant'){ sh(8,13);
+    ctx.fillStyle=P.pot; ctx.fillRect(cx-3,y+8,6,5);
+    ctx.fillStyle=P.leaf; ctx.fillRect(cx-4,y+2,8,7);
+    ctx.fillStyle=P.leaf2; ctx.fillRect(cx-2,y,4,6); ctx.fillRect(cx-4,y+4,3,3); ctx.fillRect(cx+1,y+3,3,3);
+  } else if(type==='plantBig'){ sh(10,16);
+    ctx.fillStyle=P.pot; ctx.fillRect(cx-4,y+10,8,6);
+    ctx.fillStyle=P.leaf; ctx.fillRect(cx-6,y+1,12,11);
+    ctx.fillStyle=P.leaf2; ctx.fillRect(cx-3,y-2,6,8); ctx.fillRect(cx-6,y+3,4,5); ctx.fillRect(cx+2,y+2,4,6);
+  } else if(type==='sofa'){ sh(16,11);
+    ctx.fillStyle=P.dark; ctx.fillRect(cx-8,y+2,16,8);
+    ctx.fillStyle=P.glass; ctx.fillRect(cx-7,y+4,14,5);
+    ctx.fillStyle=P.cushion; ctx.fillRect(cx-6,y+5,5,3); ctx.fillRect(cx+1,y+5,5,3);
+  } else if(type==='cooler'){ sh(6,13);
+    ctx.fillStyle='#dfe7c8'; ctx.fillRect(cx-3,y+2,6,10);
+    ctx.fillStyle=P.glass; ctx.fillRect(cx-2,y+1,4,4);
+    ctx.fillStyle=P.dark; ctx.fillRect(cx-3,y+11,6,2);
+  } else if(type==='shelf'){ sh(12,14);
+    ctx.fillStyle=P.wood; ctx.fillRect(cx-6,y,12,13);
+    ctx.fillStyle=P.lime; ctx.fillRect(cx-5,y+1,3,4);
+    ctx.fillStyle=P.leaf2; ctx.fillRect(cx-1,y+1,3,4);
+    ctx.fillStyle='#c98a6a'; ctx.fillRect(cx+2,y+1,2,4);
+    ctx.fillStyle=P.glass; ctx.fillRect(cx-5,y+7,10,1);
+    ctx.fillStyle=P.leaf; ctx.fillRect(cx-4,y+5,3,3);
+  } else if(type==='lamp'){ sh(4,13);
+    ctx.fillStyle=P.lime; ctx.fillRect(cx-3,y,6,4);
+    ctx.fillStyle=P.metal; ctx.fillRect(cx-1,y+4,2,8);
+    ctx.fillStyle=P.dark; ctx.fillRect(cx-3,y+12,6,1);
+  } else if(type==='art'){
+    ctx.fillStyle=P.wood; ctx.fillRect(cx-5,y,10,8);
+    ctx.fillStyle=P.lime; ctx.fillRect(cx-4,y+1,8,6);
+    ctx.fillStyle=P.leaf; ctx.fillRect(cx-3,y+3,3,3);
+    ctx.fillStyle=P.glass; ctx.fillRect(cx+1,y+2,3,4);
+  } else if(type==='rug'){
+    ctx.fillStyle='rgba(126,165,146,0.45)'; ctx.fillRect(cx-9,y,18,12);
+    ctx.fillStyle='rgba(217,227,138,0.5)';  ctx.fillRect(cx-6,y+3,12,6);
+    ctx.fillStyle='rgba(62,158,99,0.4)';    ctx.fillRect(cx-2,y+5,4,2);
+  } else if(type==='cart'){ sh(10,13);
+    ctx.fillStyle=P.metal; ctx.fillRect(cx-5,y+3,10,7);
+    ctx.fillStyle='#3a2e1e'; ctx.fillRect(cx-4,y+1,8,3);
+    ctx.fillStyle=P.dark; ctx.fillRect(cx-4,y+10,2,2); ctx.fillRect(cx+2,y+10,2,2);
+    ctx.fillStyle=P.leaf2; ctx.fillRect(cx-3,y+4,3,3);
+  }
 }
 
 
@@ -841,7 +872,6 @@ function loop(ts){
   const targetCam = clamp(player.py + TILE/2 - VIEW_H/2, 0, MAP_H*TILE - VIEW_H);
   camY += (targetCam - camY) * 0.2;
   if(Math.abs(targetCam-camY)<0.4) camY=targetCam;
-  updateAmbient(dt);
   render();
   requestAnimationFrame(loop);
 }
@@ -1660,30 +1690,51 @@ async function renderCard(v){
 }
 function roundRect(c,x,y,w,h,r){ c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 
-/* ---------- share / download ---------- */
+/* ---------- send report to WhatsApp / download / again ---------- */
 document.getElementById('dlBtn').onclick = ()=>{
   const a=document.createElement('a');
   a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict-the-green-room.png'; a.click();
   toast('Saved to your device');
 };
-document.getElementById('shareBtn').onclick = async ()=>{
+document.getElementById('againBtn').onclick = ()=> location.href = location.pathname;  // drop ?r= too
+
+// open / close the phone modal
+document.getElementById('sendBtn').onclick = ()=>{
+  document.getElementById('phoneErr').classList.add('hidden');
+  show('#phone');
+  setTimeout(()=>document.getElementById('pnum').focus(), 60);
+};
+document.getElementById('pBack').onclick = ()=> hide('#phone');
+const pnumEl=document.getElementById('pnum'), pccEl=document.getElementById('pcc');
+pnumEl.addEventListener('input', ()=> document.getElementById('phoneErr').classList.add('hidden'));
+pnumEl.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); document.getElementById('pSend').click(); } });
+
+function fullPhone(){
+  const cc=(pccEl.value||'').replace(/[^\d+]/g,'');
+  const num=(pnumEl.value||'').replace(/[^\d]/g,'');
+  return (cc.replace(/^\+?/,'') + num).replace(/[^\d]/g,''); // digits only, incl country code
+}
+document.getElementById('pSend').onclick = async ()=>{
+  const phone=fullPhone();
+  if(phone.length < 10 || phone.length > 15){ document.getElementById('phoneErr').classList.remove('hidden'); return; }
+  const btn=document.getElementById('pSend'); const old=btn.textContent;
+  btn.disabled=true; btn.textContent='Sending…';
+  const ok=await sendReport(phone);
+  btn.disabled=false; btn.textContent=old;
+  hide('#phone');
+  toast(ok ? 'Sent — check WhatsApp 📲' : 'Saved your number — we\u2019ll follow up');
+};
+
+async function sendReport(phone){
+  if(!WEBHOOK_URL || !lastVerdict) return false;
   try{
-    const blob = await new Promise(r=> cardCv.toBlob(r,'image/png'));
-    const file = new File([blob],'mba-verdict.png',{type:'image/png'});
-    if(navigator.canShare && navigator.canShare({files:[file]})){
-      await navigator.share({files:[file], title:'My MBA verdict', text:lastVerdict?('“'+lastVerdict.headline+'” — my read from The Green Room'):''});
-    } else {
-      const a=document.createElement('a'); a.href=cardCv.toDataURL('image/png'); a.download='mba-verdict.png'; a.click();
-      toast('Saved — share it anywhere');
-    }
-  }catch(e){ toast('Share canceled'); }
-};
-document.getElementById('copyBtn').onclick = async ()=>{
-  const line = lastVerdict? ('“'+lastVerdict.headline+'” — '+lastVerdict.final_call+' (my MBA read from The Green Room)') : '';
-  try{ await navigator.clipboard.writeText(line); toast('Line copied'); }
-  catch(e){ toast('Copy not available'); }
-};
-document.getElementById('againBtn').onclick = ()=> location.reload();
+    const res=await fetch(WEBHOOK_URL,{ method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ stage:'send_report', phone, linkedin_url:linkedinUrl, profile, answers, freetext, verdict:lastVerdict }) });
+    if(!res.ok) return false;
+    const d=await res.json().catch(()=>({}));
+    return !!(d.ok || d.report_id);
+  }catch(e){ return false; }
+}
 
 function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
@@ -1768,6 +1819,32 @@ function startGame(){
   toast('Walk up to the mentor · press A / space to talk');
 }
 
+/* ---- report-viewer mode: opened via the WhatsApp link (…/?r=<id>) ---- */
+async function maybeReportMode(){
+  const rid = new URLSearchParams(location.search).get('r');
+  if(!rid) return false;
+  hide('#title'); document.getElementById('touch').classList.add('hidden');
+  state='loading'; show('#loading');
+  document.getElementById('loadmsg').textContent='LOADING YOUR READ...';
+  let v=null, pr={};
+  if(WEBHOOK_URL){
+    try{
+      const res=await fetch(WEBHOOK_URL,{ method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ stage:'report', report_id:rid }) });
+      if(res.ok){ const d=await res.json(); v=d.verdict||null; pr=d.profile||{}; }
+    }catch(e){}
+  }
+  hide('#loading');
+  if(!v){ show('#title'); toast('Could not load that report'); return true; }
+  profile = Object.assign(profile, { name:pr.name||'', role:pr.role||'', company:pr.company||'', signals:pr.signals||{} });
+  lastVerdict = v;
+  document.getElementById('sendBtn').style.display='none';        // they already received it
+  document.getElementById('againBtn').textContent='Take it yourself →';
+  await renderCard(v);
+  state='verdict'; show('#verdict');
+  return true;
+}
+
 /* ============================================================= *
  *  TYPEWRITER TICK (piggyback on rAF via loop) + boot
  * ============================================================= */
@@ -1777,7 +1854,7 @@ function typeLoop(ts){
   if(state==='dialogue') typeTick(dt);
   requestAnimationFrame(typeLoop);
 }
-requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; initAmbient(); requestAnimationFrame(loop); requestAnimationFrame(typeLoop); });
+requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; initSideProps(); requestAnimationFrame(loop); requestAnimationFrame(typeLoop); maybeReportMode(); });
 
 /* ---- size the canvas to the viewport aspect so the floor fills the WHOLE screen ---- */
 function fit(){
