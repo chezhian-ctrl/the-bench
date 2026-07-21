@@ -1124,6 +1124,37 @@ function pickChoice(line,ch){
 function clearChoices(){ awaitChoice=false; choicesEl.innerHTML=''; }
 
 // ---- free-text: type your own answer, mentor reacts live (stage:'react'), up to MAX_FREE_TURNS ----
+
+// Free-text answers must still feed the scorers (college-fit + verdict), so we
+// classify what the person typed into the same buckets the MCQ options use.
+// Primary source is the react LLM's <bucket> tag; this is the offline / safety fallback.
+const FREE_BUCKETS = {
+  why_now: ['stuck','everyone','specific_role','reset'],
+  want:    ['network','brand','skills','all'],
+  door:    ['industry','investors','mentors','cant_name']
+};
+function localBucket(key, text){
+  const t=(text||'').toLowerCase();
+  const has=(...w)=>w.some(x=>t.includes(x));
+  if(key==='door'){
+    if(has('investor','co-found','cofound','co found',' vc','angel','fund','startup','raise','cap table')) return 'investors';
+    if(has('mentor','sponsor','guidance','advisor','advice','coach')) return 'mentors';
+    if(has('industry','break into','get into','sector','domain','pivot into')) return 'industry';
+    if(has("can't name","cannot name","not sure","no idea","don't know","dont know","honestly no")) return 'cant_name';
+  } else if(key==='want'){
+    if(has('brand','logo','prestige','pedigree','resume','résumé','cv','name on','tag','stamp')) return 'brand';
+    if(has('network','people','peers','connection','cohort','community','who i')) return 'network';
+    if(has('skill','learn','capab','knowledge','ability','operate','hands-on','hands on','craft','how to')) return 'skills';
+    if(has('everything','all of it','both','all three','honestly all')) return 'all';
+  } else if(key==='why_now'){
+    if(has('stuck','stall','plateau','stagnant','trapped','going nowhere','bored')) return 'stuck';
+    if(has('everyone','peers have','friends have','colleagues have','left behind','pressure')) return 'everyone';
+    if(has('role','position','promotion','specific','title','reach','level up','get into')) return 'specific_role';
+    if(has('reset','restart','fresh','new start','change','clean break','pivot','something new')) return 'reset';
+  }
+  return '';
+}
+
 function openFreeText(line, backFn){
   awaitChoice=true;
   choicesEl.innerHTML='';
@@ -1155,7 +1186,15 @@ async function submitFreeText(line, text){
   setSpeaker('mentor');
   dText.innerHTML='<span class="cursor show">▌</span>';
   const isFinal = st.turns >= MAX_FREE_TURNS;
-  const reply = await reactMentor(key, line.q || '', text, st.thread.slice(0,-1), isFinal);
+  const out = await reactMentor(key, line.q || '', text, st.thread.slice(0,-1), isFinal);
+  const reply = out.reply;
+  // classify the free text into a real bucket so college-fit + verdict read it like an MCQ
+  if(key && FREE_BUCKETS[key]){
+    const allow = FREE_BUCKETS[key];
+    let cls = (out.bucket && allow.includes(out.bucket)) ? out.bucket
+            : localBucket(key, st.thread.filter(m=>m.role==='you').map(m=>m.text).join(' '));
+    if(cls) answers[key] = cls;                       // real value beats the 'custom' placeholder
+  }
   st.thread.push({role:'mentor', text:reply});
   const echo = text.length>150 ? text.slice(0,150)+'…' : text;
   dq.splice(di+1, 0, {speaker:'you', text:echo}, {speaker:'mentor', text:reply, _afterFree: isFinal? null : {line, st}});
@@ -1179,10 +1218,10 @@ async function reactMentor(key, promptText, text, thread, isFinal){
     try{
       const res=await fetch(WEBHOOK_URL,{ method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ stage:'react', profile, signals:profile.signals, question:key, prompt_text:promptText, text, thread:(thread||[]), final:!!isFinal, answers }) });
-      if(res.ok){ const d=await res.json(); const r=(d.reply||'').trim(); if(r) return r; }
+      if(res.ok){ const d=await res.json(); const r=(d.reply||'').trim(); if(r) return { reply:r, bucket:(d.bucket||'') }; }
     }catch(e){}
   }
-  return fallbackReact(key, text, isFinal);
+  return { reply: fallbackReact(key, text, isFinal), bucket:'' };
 }
 function fallbackReact(key, text, isFinal){
   const nm=firstName();
