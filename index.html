@@ -278,6 +278,65 @@
     font-size:11px; color:rgba(238,242,220,.32);
   }
   .credit b{ color:rgba(238,242,220,.5); font-weight:600; }
+
+  /* ===== MBA JOURNEY (added) ===== */
+  .controls.tip{ margin-top:6px; opacity:.7; font-style:italic; }
+  #vjourney{ margin-top:8px; display:flex; justify-content:center; }
+  .btn.alt{ background:var(--mint); border-color:var(--mint-dark); color:var(--ink); }
+  .btn.alt:active{ transform:translateY(2px); }
+
+  /* small floating exit button, only while walking the hall */
+  #jexit{ position:absolute; top:12px; right:12px; z-index:40; }
+  #jexit.hidden{ display:none; }
+  #jexitBtn{
+    font-family:"Space Grotesk",sans-serif; font-weight:700; font-size:13px;
+    color:var(--paper); background:rgba(21,26,15,.72); border:1px solid rgba(238,242,220,.28);
+    padding:7px 12px; border-radius:10px; cursor:pointer; backdrop-filter:blur(3px);
+  }
+  #jexitBtn:active{ transform:translateY(1px); }
+
+  /* framing banner across the top of the hall */
+  #jbanner{
+    position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:35;
+    max-width:min(88vw,560px); text-align:center;
+    font-family:"Space Grotesk",sans-serif; font-weight:600; font-size:13px; line-height:1.35;
+    color:var(--ink); background:var(--coral); border:1px solid var(--coral-dark);
+    padding:8px 14px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,.35);
+  }
+  #jbanner.hidden{ display:none; }
+
+  /* the school-read modal */
+  #journeyModal{ display:flex; align-items:center; justify-content:center; padding:16px;
+    background:radial-gradient(120% 90% at 50% -10%, rgba(28,36,23,.86), rgba(10,13,7,.92)); z-index:45; }
+  #journeyModal.hidden{ display:none; }
+  .jcard{
+    position:relative; width:min(94vw,560px); max-height:88vh; overflow:auto;
+    background:var(--paper); color:var(--ink); border-radius:18px;
+    border:3px solid var(--ink); box-shadow:0 18px 50px rgba(0,0,0,.5);
+    padding:22px 20px 18px; font-family:"Space Grotesk",sans-serif;
+  }
+  .jclose{ position:absolute; top:12px; right:12px; width:30px; height:30px; border-radius:8px;
+    border:1px solid rgba(21,26,15,.25); background:transparent; color:var(--ink);
+    font-size:15px; font-weight:700; cursor:pointer; line-height:1; }
+  .jtop{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding-right:34px; }
+  .jschool{ font-family:"Archivo Black","Space Grotesk",sans-serif; font-size:22px; line-height:1.1; }
+  .jfit{ font-size:12px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+    padding:5px 10px; border-radius:999px; border:1.5px solid var(--ink); }
+  .jfit.strong{ background:var(--mint); }
+  .jfit.possible{ background:var(--coral); }
+  .jfit.weak{ background:#E7B24A; }
+  .jopener{ margin:14px 0 4px; font-size:16px; line-height:1.5; font-weight:500; }
+  .jfacets{ margin-top:10px; display:flex; flex-direction:column; gap:8px; }
+  .jfacet{ border:1.5px solid rgba(21,26,15,.18); border-radius:12px; overflow:hidden; background:rgba(21,26,15,.03); }
+  .jfacet .jhead{ display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:12px 14px; cursor:pointer; user-select:none; }
+  .jfacet .jlabel{ font-weight:800; font-size:14px; }
+  .jfacet .jsub{ font-size:11px; color:var(--accent-ink); opacity:.7; font-weight:600; }
+  .jfacet .jchev{ font-weight:800; transition:transform .15s ease; opacity:.55; }
+  .jfacet.open .jchev{ transform:rotate(90deg); }
+  .jfacet .jbody{ display:none; padding:0 14px 14px; font-size:14.5px; line-height:1.5; }
+  .jfacet.open .jbody{ display:block; }
+  #jBack{ margin-top:16px; width:100%; }
 </style>
 
 <div class="frame">
@@ -302,6 +361,7 @@
       <div class="sub">You've read every article. Walk the floor instead. Someone up here will look at your actual situation and just tell you.</div>
       <button class="btn" id="startBtn">Enter the floor</button>
       <div class="controls"><b>Move:</b> arrows / WASD &nbsp;·&nbsp; <b>Talk:</b> space</div>
+      <div class="controls tip">Best experienced on laptop or desktop.</div>
     </div>
 
     <!-- dialogue -->
@@ -343,9 +403,28 @@
       <div id="vactions">
         <button class="btn mini" id="sendBtn">📲 Send me the report</button>
       </div>
+      <div id="vjourney" style="display:none">
+        <button class="btn mini alt" id="journeyBtn">See your MBA journey →</button>
+      </div>
       <div id="vsecondary">
         <button class="btn ghost mini" id="dlBtn">Download</button>
         <button class="btn ghost mini" id="againBtn">Play again</button>
+      </div>
+    </div>
+
+    <!-- ===== MBA JOURNEY (added): an open hall you walk; read your path at each school ===== -->
+    <div id="jexit" class="hidden"><button id="jexitBtn">✕ Exit</button></div>
+    <div id="jbanner" class="hidden"><span id="jbannerText"></span></div>
+    <div id="journeyModal" class="layer hidden">
+      <div class="jcard">
+        <button class="jclose" id="jClose" aria-label="Close">✕</button>
+        <div class="jtop">
+          <div class="jschool" id="jSchool"></div>
+          <div class="jfit" id="jFit"></div>
+        </div>
+        <div class="jopener" id="jOpener"></div>
+        <div class="jfacets" id="jFacets"></div>
+        <button class="btn ghost mini" id="jBack">← Back to the hall</button>
       </div>
     </div>
 
@@ -776,6 +855,8 @@ function render(){
     const [ox,oy]=objective.tile;
     drawMarker(ox*TILE + XOFF, oy*TILE - camY);
   }
+  // journey room labels (added; journey mode only)
+  if(mode==='journey') drawJourneyLabels();
   // player
   drawAvatar(Math.round(player.px + XOFF), Math.round(player.py - camY), player.dir, player.frame, PLAYER_COLORS);
 }
@@ -1337,6 +1418,7 @@ function setObjectiveForNextRoom(){
  * ============================================================= */
 function handleInteract(){
   if(player.moving) return;
+  if(mode==='journey'){ handleJourneyInteract(); return; }
   const [fx,fy]=frontTile();
   let it = interact[key(fx,fy)];
   // also allow interacting with an NPC/terminal you're standing adjacent to in any dir
@@ -1454,6 +1536,7 @@ function startGeneration(){
     renderCard(v).then(()=>{
       hide('#loading'); state='verdict'; show('#verdict');
       lastVerdict=v;
+      document.getElementById('vjourney').style.display='';   // MCQs are in hand → offer the journey
     });
   });
 }
@@ -1854,6 +1937,352 @@ function typeLoop(ts){
   if(state==='dialogue') typeTick(dt);
   requestAnimationFrame(typeLoop);
 }
+/* ===== injected: MBA Journey module ===== */
+/* ================================================================
+ *  MBA JOURNEY (added)
+ *  After the verdict, the player walks an OPEN hall with four school
+ *  rooms — Top IIM Tier, ISB, XLRI, Mesa School of Business — in any
+ *  order, and reads what their path would look like at each. Every
+ *  read is personalised from the MCQ answers they gave the mentor
+ *  (NOT their free text), their derived signals, and the verdict
+ *  level. Fully client-side — no backend call, no extra cost.
+ *  Mesa is held to the same honesty bar and concedes out loud when
+ *  another school fits the player better.
+ * ================================================================ */
+let mode = 'mentor';            // 'mentor' (Act 1) | 'journey' (Act 2)
+
+// four rooms laid onto the existing 15x40 tile grid (vertical camera).
+// left rooms open at x=5, right rooms at x=9, onto a central corridor x=6..8.
+const JOURNEY_ROOMS = [
+  { id:'iim',  name:'Top IIM Tier',            short:'TOP IIMs', ix:[2,4],  iy:[6,10],  door:[5,8],  term:[3,8],  label:[3,5]  },
+  { id:'isb',  name:'ISB',                     short:'ISB',      ix:[10,12],iy:[6,10],  door:[9,8],  term:[11,8], label:[11,5] },
+  { id:'xlri', name:'XLRI',                    short:'XLRI',     ix:[2,4],  iy:[16,20], door:[5,18], term:[3,18], label:[3,15] },
+  { id:'mesa', name:'Mesa School of Business', short:'MESA',     ix:[10,12],iy:[16,20], door:[9,18], term:[11,18],label:[11,15]},
+];
+const J_SPAWN = [7, 24];
+const J_EXIT  = [7, 25];
+
+function jClearWorld(){
+  for(let y=0;y<MAP_H;y++) grid[y].fill(VOID);
+  decos.length = 0;
+  solid.clear();
+  for(const k in doorAt)   delete doorAt[k];
+  for(const k in interact) delete interact[k];
+}
+function jFloor(x0,y0,x1,y1){ for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ if(inBounds(x,y)) grid[y][x]=FLOOR; } }
+function jRoom(r){
+  const [x0,x1]=r.ix, [y0,y1]=r.iy;
+  for(let y=y0-1;y<=y1+1;y++) for(let x=x0-1;x<=x1+1;x++){
+    if(!inBounds(x,y)) continue;
+    if(y===y0-1||y===y1+1||x===x0-1||x===x1+1){ if(grid[y][x]!==FLOOR) grid[y][x]=WALL; }
+    else grid[y][x]=FLOOR;
+  }
+  grid[r.door[1]][r.door[0]] = FLOOR;         // knock the doorway to the corridor
+}
+
+function buildJourney(){
+  jClearWorld();
+  jFloor(6, 5, 8, J_EXIT[1]);                 // central corridor spine + exit tile
+  for(const r of JOURNEY_ROOMS){
+    jRoom(r);
+    const [tx,ty]=r.term;
+    solid.add(key(tx,ty));
+    interact[key(tx,ty)] = { journey:true, kind:'school', school:r.id, tile:[tx,ty], done:false };
+    decos.push({tx,ty,type:'terminal'});
+    const px2 = (r.ix[0]===2) ? r.ix[1] : r.ix[0];   // a plant in the far corner
+    putSolid(px2, r.iy[1], 'plant');
+    const wx = (r.ix[0]===2) ? 1 : 13;               // a window on the outer wall
+    putDeco(wx, r.iy[0]+1, 'window');
+  }
+  putRug(6, J_SPAWN[1]-1, 3, 2);              // exit pad at the base of the corridor
+  putDeco(J_EXIT[0], J_EXIT[1], 'mat');
+  interact[key(J_EXIT[0],J_EXIT[1])] = { journey:true, kind:'exit', tile:[J_EXIT[0],J_EXIT[1]], done:false };
+  putSolid(6, J_SPAWN[1], 'plant');
+  // place the player
+  player.tx=J_SPAWN[0]; player.ty=J_SPAWN[1];
+  player.px=player.tx*TILE; player.py=player.ty*TILE;
+  player.dir='up'; player.moving=false; player.prog=0; player.path=[];
+  player.fromX=player.tx; player.fromY=player.ty; player.toX=player.tx; player.toY=player.ty;
+  camY = clamp(player.py + TILE/2 - VIEW_H/2, 0, MAP_H*TILE - VIEW_H);
+  objective = null;
+}
+
+// room-name labels above each room (journey only; additive, drawn each frame)
+function drawJourneyLabels(){
+  ctx.save();
+  ctx.font = '7px "Space Grotesk", sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='alphabetic';
+  for(const r of JOURNEY_ROOMS){
+    const sx = r.label[0]*TILE + XOFF + TILE/2;
+    const sy = r.label[1]*TILE - camY + 6;
+    if(sy < -8 || sy > VIEW_H+8) continue;
+    ctx.fillStyle='rgba(21,26,15,.55)'; ctx.fillText(r.short, sx+0.5, sy+0.5);
+    ctx.fillStyle=COL.screenOn;         ctx.fillText(r.short, sx, sy);
+  }
+  ctx.restore();
+}
+
+/* ---- enter / exit the hall ---- */
+function journeyFraming(){
+  const lvl=(lastVerdict&&lastVerdict.call_level)||'';
+  if(lvl==='skip')        return "Your read was skip it — you probably don't need any of these. But since you're curious, here's the map.";
+  if(lvl==='not_yet')     return "Your read was not yet. If you do this later, here's what each place would be for you.";
+  if(lvl==='conditional') return "Your read was worth it — with conditions. So here's which of these actually makes those conditions work.";
+  if(lvl==='go')          return "Your read was go for it. So let's talk about where. Walk into any room.";
+  return "Walk into any room to see what your path there would look like.";
+}
+function enterJourney(){
+  hide('#verdict');
+  buildJourney();
+  mode='journey'; state='playing';
+  document.getElementById('touch').classList.remove('hidden');
+  document.getElementById('jexit').classList.remove('hidden');
+  document.getElementById('jbanner').classList.remove('hidden');
+  document.getElementById('jbannerText').textContent = journeyFraming();
+  toast('Walk into any room · press A / space to read your path there');
+}
+function exitJourney(){
+  document.getElementById('jexit').classList.add('hidden');
+  document.getElementById('jbanner').classList.add('hidden');
+  hide('#journeyModal');
+  document.getElementById('touch').classList.add('hidden');
+  mode='mentor'; state='verdict';
+  show('#verdict');
+}
+
+/* ---- interaction inside the hall ---- */
+function journeyFacingInteract(){
+  const [fx,fy]=frontTile();
+  let it = interact[key(fx,fy)];
+  if(!it){
+    for(const d of ['up','down','left','right']){
+      const [dx,dy]=DIRS[d]; const k=key(player.tx+dx,player.ty+dy);
+      if(interact[k]){ it=interact[k]; player.dir=d; break; }
+    }
+  }
+  if(!it) it = interact[key(player.tx,player.ty)] || null;   // standing on the exit pad
+  return it || null;
+}
+function handleJourneyInteract(){
+  const it = journeyFacingInteract();
+  if(!it) return;
+  if(it.kind==='exit'){ exitJourney(); return; }
+  if(it.kind==='school'){ openSchool(it.school); }
+}
+
+/* ============================================================= *
+ *  SCHOOL READS
+ *  Personalised from answers (MCQs only), signals, and the verdict
+ *  level. All copy is the mentor's voice. Facts about the three
+ *  named schools are kept directional (program length, entrance
+ *  exam, what each is genuinely known for) — no invented numbers.
+ *  Mesa's facts are from its own materials: 12-month full-time
+ *  on-campus PGP, ~Rs 24L with scholarships, MAT admission, the
+ *  Startup Lab, operator/founder focus, and its own "consider
+ *  elsewhere if" list, which drives the concede rule.
+ * ============================================================= */
+function A(){ return (typeof answers==='object' && answers) ? answers : {}; }
+function S(){ return (profile && profile.signals) ? profile.signals : {}; }
+function w(map,k){ return (k in map) ? map[k] : 0; }
+function levelWord(l){ return {early:'still early in your career', mid:'solidly mid-level', senior:'senior and established', top:'at the top of your field'}[l] || 'wherever you are right now'; }
+function fundWord(f){ return {loans:'funding it all on debt', savings:'paying from your own savings', employer:'someone else footing the bill', unsure:'no funding plan yet'}[f] || 'however you plan to pay'; }
+
+function scoreIIM(a,s){                       // 2-yr flagship, CAT, brand + consulting/finance pipeline
+  let x=0;
+  x+=w({high_finance:3,switch:1,same_senior:1,none:-1},a.target);
+  x+=w({brand:2,network:1,skills:0,all:0},a.want);
+  x+=w({early:2,mid:1,senior:0,top:-1},a.level);
+  x+=w({specific_role:1,stuck:0,everyone:0,reset:-1},a.why_now);
+  x+=w({industry:1,mentors:1,investors:0,cant_name:-1},a.door);
+  x+=w({loans:-1,unsure:-1},a.funding);
+  if(a.running==='away') x-=1;
+  if(s.has_mba) x-=3;
+  if(s.years>=12) x-=2;
+  return x;
+}
+function scoreISB(a,s){                        // 1-yr accelerated, GMAT, experienced, consulting/finance/product
+  let x=0;
+  x+=w({senior:2,mid:1,top:1,early:-2},a.level);
+  x+=w({switch:2,high_finance:2,same_senior:1,none:-1},a.target);
+  x+=w({loans:1,employer:1,unsure:-1},a.funding);
+  x+=w({network:1,skills:1,brand:0},a.want);
+  x+=w({specific_role:1},a.why_now);
+  if(s.years>=5) x+=1;
+  if(s.years>=8) x+=1;
+  if(s.years && s.years<3) x-=2;
+  if(s.has_mba) x-=2;
+  return x;
+}
+function scoreXLRI(a,s){                        // 2-yr PGDM, XAT, heritage, people-leadership + general management
+  let x=0;
+  x+=w({skills:2,network:0,brand:-2},a.want);
+  x+=w({same_senior:1,switch:1,high_finance:-1,none:-1},a.target);
+  x+=w({mid:1,early:1,senior:0,top:0},a.level);
+  x+=w({mentors:1,industry:1,cant_name:-1},a.door);
+  if(a.running==='toward') x+=1;
+  if(s.has_mba) x-=2;
+  return x;
+}
+function scoreMesa(a,s){                        // 12-mo full-time, MAT, operator/founder, Startup Lab, young
+  let x=0;
+  x+=w({switch:3,none:0,same_senior:-2,high_finance:-2},a.target);
+  x+=w({skills:2,all:0,network:0,brand:-3},a.want);
+  x+=w({investors:3,industry:1,mentors:1,cant_name:-1},a.door);
+  x+=w({specific_role:1,stuck:1,reset:0,everyone:-1},a.why_now);
+  x+=w({rejected:1,half:0,not_yet:0},a.applied);
+  x+=w({savings:1,employer:1,unsure:-1},a.funding);
+  if(a.running==='toward') x+=2;
+  if(a.running==='away')   x-=1;
+  if(s.is_founder) x+=2;
+  // note: an existing MBA is NOT a negative here — Mesa isn't another brand-MBA play
+  return x;
+}
+function fitOf(x){ return x>=5 ? 'strong' : x>=2 ? 'possible' : 'weak'; }
+function fitLabel(f){ return {strong:'Strong fit', possible:'Possible fit', weak:'Not your fit'}[f]; }
+
+function doorCallback(a){
+  return (a.door==='cant_name')
+    ? "Back in the Network Room you couldn't name a single door — hold onto that, because it doesn't get easier here. "
+    : "";
+}
+
+function schoolRead(id){
+  const a=A(), s=S(), v=lastVerdict||{};
+  const scores={ iim:scoreIIM(a,s), isb:scoreISB(a,s), xlri:scoreXLRI(a,s), mesa:scoreMesa(a,s) };
+  const fits ={ iim:fitOf(scores.iim), isb:fitOf(scores.isb), xlri:fitOf(scores.xlri), mesa:fitOf(scores.mesa) };
+  let topId='iim', topSc=-99; for(const k in scores){ if(scores[k]>topSc){ topSc=scores[k]; topId=k; } }
+  const NAME={ iim:'the IIMs', isb:'ISB', xlri:'XLRI', mesa:'Mesa' };
+  const fit=fits[id];
+  let opener='', math='', pipeline='', door='', catch_='';
+
+  if(id==='iim'){
+    opener = fit==='strong' ? "The IIMs are the powerful default — and for what you told me you want, that's not a knock. This is probably your lane."
+           : fit==='possible' ? "The IIMs would work for you, eyes open: real brand, real pipeline — but two years and an entrance exam sit between you and it."
+           : "Honest read — the IIMs are the wrong tool for what you described. Let me show you why, so you don't spend two years finding out.";
+    math = "Two full years out, plus fees, and you're "+levelWord(a.level)+", "+fundWord(a.funding)+". "
+         + ((a.level==='top'||s.years>=12) ? "At your stage that opportunity cost is brutal — the degree has to buy something you genuinely can't buy any other way."
+                                           : "You're early enough that the lost years cost you less now than they ever will again — the math is kindest to you today.");
+    pipeline = a.target==='high_finance' ? "You said consulting, banking or PE. This is the classic on-ramp — the IIM tag opens those rooms more reliably than almost anything else in India."
+             : a.target==='switch' ? "You want a career switch. Two years gives you room to actually reset, and the brand gives recruiters a reason to bet on the new you."
+             : a.target==='same_senior' ? "Same field, more senior — the IIMs will accelerate that, though honestly a chunk of it you could earn on the job too."
+             : a.target==='none' ? "You couldn't name the job. The IIMs won't hand you one — brand buys interviews, not direction. Fix that first."
+             : "The IIM pipeline is broad and real, but it rewards the people who walk in already knowing the seat they're aiming for.";
+    door = doorCallback(a)
+         + (a.want==='brand' ? "You were honest that you want the brand — and this is the one place where the brand alone genuinely moves doors. Just know that's what you're paying for."
+           : a.want==='network' ? "The alumni network here is about the deepest in the country. If that's your real reason, few places beat it."
+           : "The IIM network is wide and old — seniors, sponsors, industry access. It opens most doors, if you know which one you're knocking on.");
+    catch_ = (a.alt_tradeoff==='maybe_not'||a.alt_tradeoff==='no') ? "You admitted a cheaper path might get you 80% of the way. Against the IIMs that's the whole question — two years of prestige, or the same outcome faster and cheaper. Be sure the brand is worth the gap."
+           : a.applied==='not_yet' ? "You haven't applied to the jobs yet. Sit CAT if you like — but a rejection or two first would tell you whether you even need this."
+           : "The catch is time and the exam. CAT is a year of your life before day one, and the payoff assumes you actually use the two years, not coast them.";
+  }
+
+  else if(id==='isb'){
+    opener = fit==='strong' ? "ISB is the sharp one for you: one year, not two, and built for people who already have a track record — which you do."
+           : fit==='possible' ? "ISB could fit — its whole edge is halving the time you're out of the market. Whether that edge is worth it comes down to your experience."
+           : "ISB probably isn't your fit, and I'd rather be specific than let the one-year pitch seduce you.";
+    math = "One year, not two — that's the entire point, and it moves your math more than anything else on this floor. You're "+fundWord(a.funding)+"; "
+         + (a.funding==='loans' ? "even on debt, half the time out means roughly half the hole to climb back out of."
+                                : "and a single year out is the gentlest version of this bet you'll find at a top school.");
+    pipeline = (a.target==='high_finance'||a.target==='switch') ? "You're aiming at "+(a.target==='switch'?'a switch':'consulting or finance')+". ISB recruits hard into exactly that, and the compressed year suits someone who already knows where they're headed."
+             : a.target==='same_senior' ? "Same field, more senior — ISB can fast-track that, especially if you're bringing real years to the table already."
+             : a.target==='none' ? "You didn't name the target job. ISB's one year is too fast to enter undecided — you'd be out the far side before you figured it out."
+             : "ISB recruits strongly across consulting, finance and product — it rewards people who arrive with a plan.";
+    door = doorCallback(a)
+         + "The network's younger than the IIMs' but tight and senior, precisely because everyone here already has experience. Good rooms — if you can name the one you need.";
+    catch_ = (a.level==='early'||(s.years && s.years<3)) ? "Here's the honest catch: ISB leans toward people with real experience, and you're "+levelWord(a.level)+". Go too early and you're the least-experienced voice in a room built on experience."
+           : "The catch is the GMAT and the intensity — one year is a sprint, with little slack if you show up unsure what it's for.";
+  }
+
+  else if(id==='xlri'){
+    opener = fit==='strong' ? "XLRI's the substance pick — old, deeply respected, and strongest where it counts if you care about people and management depth over a flashy logo."
+           : fit==='possible' ? "XLRI is a real option, especially if you want depth and rigour over brand shine. One honest gap: your answers didn't point squarely at its core strength."
+           : "XLRI probably isn't the match for what you described — let me tell you why, so it isn't a mystery.";
+    math = "Two years, "+fundWord(a.funding)+", via the XAT. The cost is in the same country as the IIMs, so the question isn't the money — it's whether XLRI's particular strengths are the ones you actually need.";
+    pipeline = (a.want==='skills'||a.target==='same_senior'||a.target==='switch') ? "You said you're after "+(a.want==='skills'?'the actual skills':'a real move')+". XLRI's management and people-leadership depth is genuinely strong, and it graduates operators, not just résumés."
+             : a.target==='high_finance' ? "You're pointed at finance — not XLRI's headline strength. It can get you there, but you'd be swimming slightly against its current."
+             : a.target==='none' ? "No target named. XLRI's rigour rewards intent; walk in undecided and you'll get a fine degree and no direction."
+             : "XLRI is strongest in general management and people leadership — a great fit if that's the work, a stretch if it isn't.";
+    door = doorCallback(a)
+         + (a.want==='brand' ? "You were honest that the logo matters to you. XLRI's respected, but it trades on substance more than flash — if brand-shine is the goal, this isn't the loudest one."
+           : "XLRI's alumni run deep in HR, ops and general management — specific, loyal and very real, if that's the room you want to be in.");
+    catch_ = a.want==='brand' ? "The catch, for you specifically: you want the brand, and XLRI rewards the ones who want the craft. That's a mismatch of motive, not of quality."
+           : "The honest catch — I'm reading your fit here off answers that don't name people-leadership directly. Treat it as 'strong if that's your lane,' not a certainty.";
+  }
+
+  else { // mesa — held to the same bar; concedes out loud when someone else fits better
+    const concede = (topId!=='mesa' && fit!=='strong');
+    opener = fit==='strong' ? "This is the one built for what you actually said. Twelve months, full-time, and the whole thing is about building — not studying other people's cases."
+           : concede ? "Straight up — from your answers, "+NAME[topId]+" fits you better than we do, and I won't pretend otherwise. Mesa's only the right call if what you really want is to build. If it is, read on."
+           : fit==='possible' ? "Mesa's worth a look if you're here to operate and build rather than collect a credential. Here's the honest fit."
+           : "I'll be as honest as Mesa is: if it's the brand and a traditional track you want, Mesa itself tells you to look elsewhere — and so will I.";
+    if(s.has_mba) opener += " And you already hold an MBA — so this was never about the degree; it's about whether you want to build.";
+    math = "Roughly Rs 24L, one year, full-time on campus — you can't phone this in from your job. "
+         + (a.funding==='employer' ? "Employer or scholarship helps; ask about the scholarships either way. "
+           : a.funding==='loans' ? "On debt it's real money, but a single year out plus scholarships softens it — worth the conversation. "
+           : "Scholarships exist, and the one-year length keeps the opportunity cost lower than any two-year programme here. ")
+         + "The return case rests on outcomes — about 26 LPA average, top performers past 35 in operator roles — not on a decades-old name.";
+    pipeline = (a.target==='switch'||a.want==='skills'||s.is_founder) ? "You said you want "+(a.target==='switch'?'to switch — into building':'the actual skills')+". The Startup Lab is the literal mechanism: incubate, pitch real investors, pivot fast. You graduate having built something, not just having interviewed."
+             : (a.target==='high_finance'||a.target==='same_senior') ? "You're pointed at "+(a.target==='high_finance'?'consulting or finance':'the same field, more senior')+" — exactly the traditional track Mesa tells you to consider elsewhere for. If that's genuinely the goal, the IIM or ISB route is the honest answer."
+             : a.target==='none' ? "No target named. Mesa's fine with that only if the real answer is 'I want to build something' — otherwise you need direction before a programme."
+             : "Mesa feeds operator and founder roles, not a corporate conveyor belt. Fit depends entirely on whether building is the point for you.";
+    door = (a.door==='cant_name')
+             ? "Back in the Network Room you couldn't name a door. Here's the one Mesa is built to open that's genuinely hard to open alone: real investors and co-founders, through the Startup Lab. If that's a door you'd actually use, this is the room."
+           : a.door==='investors' ? "You named investors and co-founders as the door — that's the single thing Mesa is built to open. The Startup Lab puts you in front of them by design, not by luck."
+           : a.want==='brand' ? "You told me the brand matters most. Mesa's three years old — it can't sell you decades of logo and it won't try. That particular door, honestly, the IIMs open better."
+           : "Mesa's network is founders and operators — the people teaching are the people building. Strong doors into startups and cap tables; weaker ones into legacy corporates.";
+    catch_ = "The honest catch, in Mesa's own words: if you want a traditional corporate or consulting track, or the brand matters more than the hands-on outcome, look elsewhere. It's a young school betting on what you build, not what you can name at dinner. "
+           + (a.want==='brand' ? "You said the logo matters — take that seriously here."
+             : (a.target==='high_finance'||a.target==='same_senior') ? "Your target leans traditional — weigh that honestly."
+             : "For what you actually told me you want, that bet looks like it lines up.");
+  }
+
+  return { id, name:NAME[id]==='the IIMs'?'Top IIM Tier':(JOURNEY_ROOMS.find(r=>r.id===id).name),
+           fit, fitLabel:fitLabel(fit),
+           opener, facets:{ math, pipeline, door, catch:catch_ } };
+}
+
+/* ---- render the school modal ---- */
+function openSchool(id){
+  const r = schoolRead(id);
+  document.getElementById('jSchool').textContent = r.name;
+  const fitEl=document.getElementById('jFit');
+  fitEl.textContent = r.fitLabel; fitEl.className='jfit '+r.fit;
+  document.getElementById('jOpener').textContent = r.opener;
+  const wrap=document.getElementById('jFacets'); wrap.innerHTML='';
+  const meta=[
+    ['The Math','the numbers, for you','math'],
+    ['The Pipeline','what the job actually is','pipeline'],
+    ['The Door','the network question','door'],
+    ['The Catch','the cheaper path','catch'],
+  ];
+  meta.forEach(function(m,i){
+    const f=document.createElement('div'); f.className='jfacet'+(i===0?' open':'');
+    const head=document.createElement('div'); head.className='jhead';
+    head.innerHTML='<span><span class="jlabel"></span> <span class="jsub"></span></span><span class="jchev">\u203A</span>';
+    head.querySelector('.jlabel').textContent=m[0];
+    head.querySelector('.jsub').textContent=m[1];
+    const body=document.createElement('div'); body.className='jbody'; body.textContent=r.facets[m[2]];
+    head.addEventListener('click', function(){ f.classList.toggle('open'); });
+    f.appendChild(head); f.appendChild(body); wrap.appendChild(f);
+  });
+  state='journeyModal'; show('#journeyModal');
+  document.querySelector('#journeyModal .jcard').scrollTop=0;
+}
+function closeSchool(){ hide('#journeyModal'); state='playing'; }
+
+/* ---- wire the buttons ---- */
+document.getElementById('journeyBtn').onclick = enterJourney;
+document.getElementById('jexitBtn').onclick   = exitJourney;
+document.getElementById('jClose').onclick      = closeSchool;
+document.getElementById('jBack').onclick       = closeSchool;
+addEventListener('keydown', function(e){
+  if(e.key==='Escape'){
+    if(state==='journeyModal'){ closeSchool(); e.preventDefault(); }
+    else if(mode==='journey' && state==='playing'){ exitJourney(); e.preventDefault(); }
+  }
+});
+
+
 requestAnimationFrame(t=>{ last=t; _lastTypeTs=t; initSideProps(); requestAnimationFrame(loop); requestAnimationFrame(typeLoop); maybeReportMode(); });
 
 /* ---- size the canvas to the viewport aspect so the floor fills the WHOLE screen ---- */
