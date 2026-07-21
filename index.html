@@ -2125,7 +2125,7 @@ function scoreXLRI(a,s){                        // 2-yr PGDM, XAT, heritage, peo
 }
 function scoreMesa(a,s){                        // 12-mo full-time, MAT, operator/founder, Startup Lab, young
   let x=0;
-  x+=w({switch:3,none:0,same_senior:-2,high_finance:-2},a.target);
+  x+=w({switch:1,none:0,same_senior:-2,high_finance:-2},a.target);  // a generic switch is only mildly Mesa; the real weight comes from build signals below
   x+=w({skills:2,all:0,network:0,brand:-3},a.want);
   x+=w({investors:3,industry:1,mentors:1,cant_name:-1},a.door);
   x+=w({specific_role:1,stuck:1,reset:0,everyone:-1},a.why_now);
@@ -2221,10 +2221,16 @@ function schoolRead(id){
            : a.funding==='loans' ? "On debt it's real money, but a single year out plus scholarships softens it — worth the conversation. "
            : "Scholarships exist, and the one-year length keeps the opportunity cost lower than any two-year programme here. ")
          + "The return case rests on outcomes — about 26 LPA average, top performers past 35 in operator roles — not on a decades-old name.";
-    pipeline = (a.target==='switch'||a.want==='skills'||s.is_founder) ? "You said you want "+(a.target==='switch'?'to switch — into building':'the actual skills')+". The Startup Lab is the literal mechanism: incubate, pitch real investors, pivot fast. You graduate having built something, not just having interviewed."
-             : (a.target==='high_finance'||a.target==='same_senior') ? "You're pointed at "+(a.target==='high_finance'?'consulting or finance':'the same field, more senior')+" — exactly the traditional track Mesa tells you to consider elsewhere for. If that's genuinely the goal, the IIM or ISB route is the honest answer."
-             : a.target==='none' ? "No target named. Mesa's fine with that only if the real answer is 'I want to build something' — otherwise you need direction before a programme."
-             : "Mesa feeds operator and founder roles, not a corporate conveyor belt. Fit depends entirely on whether building is the point for you.";
+    const buildSignal = s.is_founder || a.door==='investors';
+    pipeline = buildSignal
+        ? "You pointed at building — "+(a.door==='investors'?'you named investors and co-founders':'you\u2019re already building')+". The Startup Lab is the literal mechanism: incubate, pitch real investors, pivot fast. You graduate having built something, not just having interviewed."
+      : a.target==='switch'
+        ? "You said you want a clean switch. Mesa fits that only if the thing you\u2019re switching into is building or operating \u2014 that\u2019s what the Startup Lab is for. If you\u2019re switching into a traditional track instead, be honest with yourself: that\u2019s not this room."
+      : a.want==='skills'
+        ? "You said you\u2019re after the actual skills. Mesa\u2019s whole model is hands-on \u2014 you build and operate rather than study cases. If those are the skills you meant, this is the mechanism; if you meant something more analytical, it isn\u2019t."
+      : (a.target==='high_finance'||a.target==='same_senior') ? "You\u2019re pointed at "+(a.target==='high_finance'?'consulting or finance':'the same field, more senior')+" \u2014 exactly the traditional track Mesa tells you to consider elsewhere for. If that\u2019s genuinely the goal, the IIM or ISB route is the honest answer."
+      : a.target==='none' ? "No target named. Mesa\u2019s fine with that only if the real answer is \u2018I want to build something\u2019 \u2014 otherwise you need direction before a programme."
+      : "Mesa feeds operator and founder roles, not a corporate conveyor belt. Fit depends entirely on whether building is the point for you.";
     door = (a.door==='cant_name')
              ? "Back in the Network Room you couldn't name a door. Here's the one Mesa is built to open that's genuinely hard to open alone: real investors and co-founders, through the Startup Lab. If that's a door you'd actually use, this is the room."
            : a.door==='investors' ? "You named investors and co-founders as the door — that's the single thing Mesa is built to open. The Startup Lab puts you in front of them by design, not by luck."
